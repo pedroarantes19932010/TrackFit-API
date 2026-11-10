@@ -20,8 +20,6 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    env:
-      GH_TOKEN: ${{ github.token }}
     steps:
       - name: Check out default branch
         uses: actions/checkout@v4
@@ -32,6 +30,8 @@ jobs:
           python-version: "3.11"
       - name: Skip when another automated PR is open
         id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$(gh pr list --state open --search 'in:title [TrackFit Bot]' --json number --jq 'length')" -gt 0 ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -55,6 +55,8 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Publish branch and draft PR
         if: steps.guard.outputs.skip == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ -z "$(git status --porcelain)" ]; then
             echo "No changes generated."
