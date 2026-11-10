@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.venv/
+# Registros locais: não enviar dados de alunos ao GitHub.
+historico_treinos.json
+historico_treinos.json.bak
+historico_treinos.json.lock
+historico_treinos.json.*.tmp
+historico_treinos.json.bak.*.tmp
