@@ -7,3 +7,10 @@ historico_treinos.json.bak
 historico_treinos.json.lock
 historico_treinos.json.*.tmp
 historico_treinos.json.bak.*.tmp
+# Banco de dados local do protótipo
+*.sqlite
+*.sqlite3
+*.db
+*.sqlite-wal
+*.sqlite-shm
+.env
