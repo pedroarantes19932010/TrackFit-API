@@ -1,0 +1,71 @@
+name: Daily AI development (PR only)
+
+on:
+  schedule:
+    # 09:00 America/Sao_Paulo (UTC-03, sem horario de verao atualmente).
+    - cron: "0 12 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trackfit-daily-agent
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out default branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Skip when another automated PR is open
+        id: guard
+        run: |
+          if [ "$(gh pr list --state open --search 'in:title [TrackFit Bot]' --json number --jq 'length')" -gt 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Open automated PR exists; skipping."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Generate bounded code changes
+        if: steps.guard.outputs.skip == 'false'
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_MODEL: ${{ vars.TRACKFIT_AGENT_MODEL || 'gpt-4.1-mini' }}
+        run: |
+          test -n "$OPENAI_API_KEY" || { echo "::error::Configure OPENAI_API_KEY in repository secrets"; exit 1; }
+          python scripts/daily_agent.py
+      - name: Install test dependencies
+        if: steps.guard.outputs.skip == 'false'
+        run: python -m pip install -r requirements-api.txt
+      - name: Run tests
+        if: steps.guard.outputs.skip == 'false'
+        run: python -m unittest discover -s tests -v
+      - name: Publish branch and draft PR
+        if: steps.guard.outputs.skip == 'false'
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No changes generated."
+            exit 0
+          fi
+          BRANCH="bot/daily-${{ github.run_id }}-${{ github.run_attempt }}"
+          git config user.name "trackfit-ai-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add -- trackfit_api tests
+          git diff --cached --quiet && exit 0
+          git commit -m "feat: daily bounded AI proposal"
+          git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" push origin "HEAD:refs/heads/$BRANCH"
+          gh pr create --draft --base "${{ github.event.repository.default_branch }}" --head "$BRANCH" --title "[TrackFit Bot] Daily development proposal" --body "Automated bounded proposal. Tests passed in generation workflow. Review code and CI before merging. No automatic merge."
