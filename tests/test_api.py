@@ -12,7 +12,7 @@ class ApiSmokeTests(unittest.TestCase):
         self.assertEqual(statuses["revisao_professor"], "prototipo_local")
 
     def test_routes_exist(self):
-        paths = {route.path for route in app.routes}
+        paths = {route.path for route in app.routes if hasattr(route, 'path')}
         self.assertTrue({"/health", "/capabilities", "/docs"}.issubset(paths))
 
 
