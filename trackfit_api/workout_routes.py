@@ -1,30 +1,16 @@
 """Endpoints de fichas para protótipo local; não adequados a produção."""
-import hmac
 import os
 import sqlite3
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from trackfit_api.storage import connect, get_current, list_versions, save_initial, save_revision
+from trackfit_api.storage import get_current, list_versions, save_initial, save_revision
+from trackfit_api.identity import identity_db, current_user, require_trainer, require_access
 from trackfit_api.workouts import Exercise, WorkoutError, publish_initial, revise
 
 router = APIRouter(prefix="/v1/workouts", tags=["workouts"])
-
-
-def require_prototype_key(x_trackfit_key: str | None = Header(default=None)) -> None:
-    """Chave compartilhada somente para desenvolvimento; não identifica usuários."""
-    expected = os.environ.get("TRACKFIT_DEV_API_KEY", "")
-    if len(expected) < 32 or not x_trackfit_key or not hmac.compare_digest(expected, x_trackfit_key):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Acesso não autorizado")
-
-
-def database_path() -> Path:
-    path = os.environ.get("TRACKFIT_DB_PATH")
-    if not path:
-        raise HTTPException(status_code=503, detail="Banco de desenvolvimento não configurado")
-    return Path(path)
 
 
 class ExerciseInput(BaseModel):
@@ -41,7 +27,6 @@ class CreateWorkout(BaseModel):
 
 class ReviseWorkout(BaseModel):
     expected_version: int = Field(ge=1)
-    reviewer_id: str = Field(min_length=1, max_length=120)
     exercises: list[ExerciseInput] = Field(min_length=1, max_length=30)
 
 
@@ -60,45 +45,51 @@ def _serialize(workout):
     }
 
 
-@router.post("", status_code=201, dependencies=[Depends(require_prototype_key)])
-def create_workout(payload: CreateWorkout):
+@router.post("", status_code=201)
+def create_workout(payload: CreateWorkout, user: dict = Depends(require_trainer)):
     try:
         workout = publish_initial(payload.student_id, _exercises(payload.exercises), source="manual")
-        with connect(database_path()) as db:
+        with identity_db() as db:
+            require_access(db, user, payload.student_id)
             save_initial(db, workout)
         return _serialize(workout)
     except WorkoutError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-@router.get("/{workout_id}", dependencies=[Depends(require_prototype_key)])
-def read_workout(workout_id: str):
-    with connect(database_path()) as db:
+@router.get("/{workout_id}")
+def read_workout(workout_id: str, user: dict = Depends(current_user)):
+    with identity_db() as db:
         current = get_current(db, workout_id)
+        if current is not None:
+            require_access(db, user, current.student_id)
     if current is None:
         raise HTTPException(status_code=404, detail="Ficha não encontrada")
     return _serialize(current)
 
 
-@router.get("/{workout_id}/versions", dependencies=[Depends(require_prototype_key)])
-def read_versions(workout_id: str):
-    with connect(database_path()) as db:
+@router.get("/{workout_id}/versions")
+def read_versions(workout_id: str, user: dict = Depends(current_user)):
+    with identity_db() as db:
         versions = list_versions(db, workout_id)
+        if versions:
+            require_access(db, user, versions[0].student_id)
     if not versions:
         raise HTTPException(status_code=404, detail="Ficha não encontrada")
     return [_serialize(item) for item in versions]
 
 
-@router.post("/{workout_id}/revisions", status_code=201, dependencies=[Depends(require_prototype_key)])
-def revise_workout(workout_id: str, payload: ReviseWorkout):
+@router.post("/{workout_id}/revisions", status_code=201)
+def revise_workout(workout_id: str, payload: ReviseWorkout, user: dict = Depends(require_trainer)):
     try:
-        with connect(database_path()) as db:
+        with identity_db() as db:
             current = get_current(db, workout_id)
             if current is None:
                 raise HTTPException(status_code=404, detail="Ficha não encontrada")
+            require_access(db, user, current.student_id)
             if current.version != payload.expected_version:
                 raise HTTPException(status_code=409, detail="Versão desatualizada")
-            old, new = revise(current, _exercises(payload.exercises), payload.reviewer_id)
+            old, new = revise(current, _exercises(payload.exercises), user['user_id'])
             save_revision(db, old, new)
         return _serialize(new)
     except WorkoutError as exc:
