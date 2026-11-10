@@ -9,7 +9,7 @@ from trackfit_api.ai_routes import router as ai_router
 app = FastAPI(title="TrackFit API", version="0.2.0", description="Protótipo local do TrackFit")
 app.include_router(workout_router)
 app.include_router(auth_router)
-app.include_router(ai_router
+app.include_router(ai_router)
 
 
 class HealthResponse(BaseModel):
