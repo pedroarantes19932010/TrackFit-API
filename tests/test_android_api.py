@@ -67,6 +67,35 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(review.status_code,200)
         self.assertNotIn('previous_sets', self.start(plan|{'version':2})['snapshot'])
 
+    def test_week_schedule_support_and_delayed_sync(self):
+        self.template()
+        plan=self.generate().json()['id']
+        path=f'/plans/{plan}/schedule'
+        def week(headers):
+            return self.client.get('/week/0',headers=headers).json()
+        day=week(self.t)['today']
+        data={'day':day,'scheduled':True}
+        self.assertEqual(self.client.post(path,headers=self.s,json=data).status_code,403)
+        self.assertEqual(self.client.post(path,headers={'Authorization':'Bearer foreign'},json=data).status_code,404)
+        for _ in range(2):
+            self.assertEqual(self.client.post(path,headers=self.t,json=data).status_code,200)
+        self.assertEqual(week(self.o)['students'][0]['appointments'],[])
+        student=week(self.s)['students'][0]
+        self.assertEqual(len(student['appointments']),1)
+        self.assertFalse(student['appointments'][0]['done'])
+        self.client.post(f'/plans/{plan}/support',headers=self.s,json={'request_id':str(uuid4()),'message':'Dúvida teste'})
+        own=next(r for r in week(self.t)['students'] if r['id']=='student')
+        self.assertEqual(own['awaiting'],[plan])
+        self.client.post(f'/plans/{plan}/support',headers=self.t,json={'request_id':str(uuid4()),'message':'Resposta teste'})
+        self.assertFalse(any(r['awaiting'] for r in week(self.t)['students']))
+        current=self.start({'id':plan,'version':1})
+        self.client.post(f"/sessions/{current['id']}/finish",headers=self.s,json={'sets':[dict(exercise_index=0,set_index=0,weight_kg=1,reps=1)],'note':''})
+        student=week(self.s)['students'][0]
+        self.assertEqual(student['completed'],1)
+        self.assertTrue(student['appointments'][0]['done'])
+        self.client.post(path,headers=self.t,json=data|{'scheduled':False})
+        self.assertFalse(week(self.s)['students'][0]['appointments'])
+
     def test_idempotent_plan_and_notification(self):
         self.template(); body={'request_id':str(uuid4()),'profile':PROFILE}
         a=self.client.post('/plans',headers=self.s,json=body)

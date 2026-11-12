@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from trackfit_api.identity import current_user, request_database
 from trackfit_api.auth_routes import router as auth_router
 from trackfit_api.workout_routes import router as workout_router
-from server import push, timeline, support, videos
+from server import push, timeline, support, videos, weekly
 from trackfit_api.catalog_routes import router as catalog_router
 from datetime import datetime
 from server.accounts import add_code_account, prepare_accounts
@@ -70,7 +70,7 @@ def create_app(db_path=None, mode=None, chooser=None):
 
     with db(True) as conn:
         prepare_accounts(conn)
-        for statement in (SCHEMA + push.SCHEMA + support.SCHEMA + videos.SCHEMA).split(";"):
+        for statement in (SCHEMA + push.SCHEMA + support.SCHEMA + videos.SCHEMA + weekly.SCHEMA).split(";"):
             if statement.strip():
                 conn.execute(statement)
     push_enabled = os.getenv("TRACKFIT_PUSH") == "fcm"
@@ -357,6 +357,7 @@ def create_app(db_path=None, mode=None, chooser=None):
             conn.execute("UPDATE training_sessions SET state='finished',actual=? WHERE id=?", (actual,session_id))
             return show_session(conn.execute("SELECT * FROM training_sessions WHERE id=?", (session_id,)).fetchone())
 
+    weekly.install(app, db, auth, trainer, get_plan)
     videos.install(app, db, auth, trainer)
     support.install(app, db, auth, get_plan)
     return app

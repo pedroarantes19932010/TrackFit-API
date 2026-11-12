@@ -64,3 +64,9 @@ python -m server.evaluate_selector examples/avaliacoes_ficticias.json
 O modo demo seleciona o primeiro candidato. Para preparar a sua avaliação, use perfis fictícios, ofereça somente fichas elegíveis e preencha expected com o ID da ficha que escolheria. Inclua escolhas difíceis com duas ou mais fichas e varie a ordem dos candidatos. Mantenha alguns casos separados para testar mudanças futuras. Compare as divergências antes e depois de mudar as instruções de seleção.
 
 Com as credenciais de API configuradas no ambiente, a opção `--provider openai` consulta o modelo uma vez por caso e pode gerar cobrança. Esse comando mede a concordância com os rótulos do treinador. Ele não atualiza os pesos do modelo nem altera as fichas do aplicativo.
+
+## Agenda semanal do piloto conectado
+
+Na ficha liberada do aluno, o treinador escolhe **Data do treino** e toca em **Agendar treino**. O mesmo agendamento pode ser retirado na **Agenda semanal**. A agenda usa a semana de segunda a domingo no horário de Brasília (UTC−3). O aluno vê as próprias datas e pode abrir a ficha. O treinador também vê as conversas cuja última mensagem veio do aluno.
+
+O painel conta as sessões concluídas pela data em que foram iniciadas e só recebe o registro depois da sincronização. Assim, um treino que voltar da academia sem sinal pode aparecer mais tarde na semana original. Uma ficha agendada aparece como concluída quando há uma sessão concluída daquela ficha iniciada naquela data.

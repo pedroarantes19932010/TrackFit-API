@@ -88,9 +88,42 @@ async function home(){
  const plans=await api('GET','/plans'), trainer=me.role==='trainer';
  page(`<span class="eyebrow">${trainer?'ÁREA DO TREINADOR':'ÁREA DO ALUNO'}</span><h1>Olá, ${esc(me.name.split(' ')[0])}.</h1><p class="muted">${trainer?'As fichas chegam completas. Você revisa e acompanha por aqui.':'Sua ficha e seu histórico, no mesmo lugar.'}</p>${me.provider==='demo'&&!demo?'<div class="notice">Servidor em modo demonstração: seleção por regras, sem IA real.</div>':''}<div class="hero"><small>${trainer?'PARA ACOMPANHAR':'SEU ESPAÇO'}</small><h2>${trainer?plans.filter(p=>['pending','released'].includes(p.state)).length+' fichas para revisar':'Vamos treinar?'}</h2><p>${trainer?'Revisões e avaliações individuais pendentes.':'Preencha a avaliação para receber sua ficha.'}</p></div>${demo?'<button id="switchDemo" class="secondary">Ver como '+(trainer?'aluno':'treinador')+'</button>':''}<button id="primary">${trainer?'Cadastrar aluno':'Preencher avaliação'}</button><h2>${trainer?'Fichas dos alunos':'Minhas fichas'}</h2><div id="plans"></div><div id="supportHome"></div><button id="timeline" class="secondary">Consultar histórico completo</button>`);
  if(!demo){$('#supportHome').innerHTML='<button id="inbox">Conversas sobre fichas</button>';button('inbox',supportInbox);}
+ if(!demo){$('#supportHome').insertAdjacentHTML('beforeend','<button id="week">Agenda semanal</button>');button('week',()=>weekly());}
  button('timeline',()=>timeline(0));button('primary',trainer?newStudent:assessment);button('switchDemo',async()=>{me.role=trainer?'student':'trainer';me.name=trainer?'Ana Demo':'Pedro Demo';shell();await home();});
  if(!plans.length)$('#plans').innerHTML='<div class="empty">Nenhuma ficha ainda. '+(trainer?'Comece cadastrando um aluno e criando seus modelos.':'Sua primeira ficha aparecerá aqui.')+'</div>';
  for(const p of plans){const el=document.createElement('div');el.className='card';el.innerHTML=`<span class="badge ${p.state}">${esc(labels[p.state])}</span><h2>${esc(p.student_name)}</h2><p>${p.days.length?p.days.length+' dias • versão '+p.version:'Avaliação aguardando atendimento'}</p><button>Abrir ficha</button>`;el.querySelector('button').onclick=()=>detail(p.id).catch(e=>toast(e.message));$('#plans').append(el);}
+}
+function shortDate(iso){return iso.split('-').reverse().join('/');}
+async function weekly(offset=0){
+ const account=me, data=await api('GET','/week/'+offset);
+ if(me!==account)return;
+ const trainer=me.role==='trainer';
+ page('<h1>Agenda semanal</h1><p>'+shortDate(data.start)+' a '+shortDate(data.end)+' • Brasília</p><button id="earlier">Semana anterior</button><button id="later">Próxima semana</button><div id="weekRows"></div>');
+ button('earlier',()=>weekly(offset-1));button('later',()=>weekly(offset+1));
+ $('#earlier').disabled=offset<=-52;$('#later').disabled=offset>=52;
+ if(!data.students.length)$('#weekRows').textContent='Nenhum aluno vinculado.';
+ for(const student of data.students){
+   const card=document.createElement('section');card.className='card';
+   card.innerHTML='<h2>'+esc(student.name)+'</h2><p>'+student.completed+' treino(s) concluído(s) • '+student.appointments.length+' agendamento(s)</p>';
+   for(const a of student.appointments){
+     const line=document.createElement('p');
+     const status=a.done?'Concluído':a.suspended?'Ficha suspensa':a.date<data.today?'Sem registro':'Previsto';
+     line.textContent=shortDate(a.date)+' • '+status+' ';
+     const open=document.createElement('button');open.textContent='Ver ficha';
+     open.onclick=()=>detail(a.plan).catch(e=>toast(e.message));line.append(open);
+     if(trainer){
+       const remove=document.createElement('button');remove.textContent='Retirar da agenda';
+       remove.onclick=async()=>{try{await api('POST','/plans/'+a.plan+'/schedule',{day:a.date,scheduled:false});await weekly(offset);}catch(e){toast(e.message);}};
+       line.append(remove);
+     }
+     card.append(line);
+   }
+   for(const id of student.awaiting){
+     const reply=document.createElement('button');reply.textContent='Responder aluno';
+     reply.onclick=()=>conversation(id).catch(e=>toast(e.message));card.append(reply);
+   }
+   $('#weekRows').append(card);
+ }
 }
 function newStudent(){page('<span class="eyebrow">NOVO ALUNO</span><h1>Vamos começar.</h1><p>O código dá acesso somente aos dados deste aluno. Compartilhe em privado.</p>'+input('name','Nome do aluno')+'<button id="create">Criar acesso</button><div id="result"></div>');button('create',async()=>{const name=$('#name').value.trim();if(name.length<2)throw Error('Informe o nome.');const r=await api('POST','/students',{name});$('#result').innerHTML='<div class="card"><h2>Acesso criado</h2><p>Guarde este código: ele é exibido uma única vez.</p><div class="code">'+esc(r.access_code)+'</div><p><small>Válido por 30 dias.</small></p></div>';});}
 function assessment(){
@@ -159,6 +192,16 @@ async function detail(id){
  if(trainer){$('#actions').innerHTML='<button id="approve">Marcar como revisada</button><button id="edit" class="secondary">Editar ficha completa</button><button id="suspend" class="danger">Suspender ficha</button>';button('approve',()=>reviewNote(p,'approve'));button('edit',()=>editPlan(p));button('suspend',()=>reviewNote(p,'suspend'));}
  else if(['released','reviewed'].includes(p.state)){
  $('#actions').innerHTML=select('day','Qual treino fará agora?',p.days.map((d,i)=>[i,esc(d.title)]))+'<button id="start">Iniciar treino</button>';const requestId=uuid();button('start',async()=>{const s=await api('POST',`/plans/${id}/sessions`,{request_id:requestId,expected_version:p.version,day:Number($('#day').value)});sessionView(s,p.days);});}
+ if(trainer&&!demo&&['released','reviewed'].includes(p.state)){
+   $('#actions').insertAdjacentHTML('beforeend',input('scheduledDate','Data do treino','','date')+'<button id="schedule">Agendar treino</button>');
+   button('schedule',async()=>{
+     const day=$('#scheduledDate').value;
+     if(!day)throw Error('Escolha uma data.');
+     await api('POST','/plans/'+id+'/schedule',{day,scheduled:true});
+     toast('Treino agendado para '+shortDate(day)+'.');
+   });
+ }
+
 }
 async function supportInbox(){
  const rows=await api('GET','/support');
