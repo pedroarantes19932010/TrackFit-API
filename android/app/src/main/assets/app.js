@@ -3,7 +3,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const app=$('#app'); let token='',origin='',me=null,demo=false,poller=null,requestCount=0;
 const awaiting=new Map(), announced=new Set();
-let catalog=[];
+let catalog=[], offline=false;
 let generation=null, pushBinding=null;
 const labels={pending:'Aguardando avaliação',released:'Revisão pendente',reviewed:'Revisada pelo treinador',suspended:'Suspensa'};
 function uuid(){
@@ -16,7 +16,7 @@ function uuid(){
 }
 const copy=value=>JSON.parse(JSON.stringify(value));
 function toast(message){$('#toast').textContent=message;$('#toast').style.display='block';clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').style.display='none',7000);}
-window.receiveNative=(id,response)=>{const item=awaiting.get(id);if(!item)return;clearTimeout(item.timer);awaiting.delete(id);response.status>=200&&response.status<300?item.resolve(response.body):item.reject(new Error(typeof response.body?.detail==='string'?response.body.detail:'Confira os campos preenchidos.'));};
+window.receiveNative=(id,response)=>{const item=awaiting.get(id);if(!item)return;clearTimeout(item.timer);awaiting.delete(id);response.status>=200&&response.status<300?item.resolve(response.body):item.reject(Object.assign(new Error(typeof response.body?.detail==='string'?response.body.detail:'Confira os campos preenchidos.'),{status:response.status}));};
 function api(method,path,body={}){
  if(demo)return demoApi(method,path,body);
  if(!window.TrackFitNative)return Promise.reject(new Error('Abra o aplicativo Android ou use a demonstração.'));
@@ -29,6 +29,28 @@ function select(id,label,options){return `<label for="${id}">${label}</label><se
 const goals=[['condicionamento','Condicionamento'],['hipertrofia','Hipertrofia']];
 const levels=[['iniciante','Iniciante'],['intermediario','Intermediário']];
 const equipment=[['academia','Academia'],['casa','Casa']];
+function downloadKey(){
+ return JSON.stringify(['active-download-v1',origin,token]);
+}
+function readDownload(){
+ const raw=window.TrackFitNative?.loadFinish?.(downloadKey());
+ if(!raw||raw==='!')return null;
+ try{return JSON.parse(raw);}catch{return null;}
+}
+function clearDownload(sessionId){
+ const saved=readDownload();
+ if(saved?.session.id===sessionId)window.TrackFitNative.storeFinish(downloadKey(),'');
+}
+function saveDownload(session,days){
+ const previous=readDownload();
+ const same=previous?.session.id===session.id;
+ const planDays=days||(same?previous.days:[session.snapshot]);
+ const exerciseIds=new Set(planDays.flatMap(d=>d.exercises.map(e=>e.exercise_id)));
+ const reference=catalog.filter(e=>exerciseIds.has(e.exercise_id)).map(e=>({...e,videos:[]}));
+ const data={userId:me.id,session:{id:session.id,plan:session.plan,state:'active',version:session.version,snapshot:session.snapshot},
+             days:planDays,catalog:reference};
+ return window.TrackFitNative.storeFinish(downloadKey(),JSON.stringify(data));
+}
 function login(){
  if(me && !demo) window.TrackFitNative?.bindPush?.('');
  for(const item of awaiting.values()){
@@ -36,9 +58,20 @@ function login(){
    item.reject(new Error('A sessão anterior foi encerrada.'));
  }
  awaiting.clear();
- pushBinding=null;clearInterval(poller);me=null;token='';demo=false;announced.clear();generation=null;$('#nav').hidden=true;$('#logout').hidden=true;
- page('<h1>Seu treino no TrackFit</h1><div class="hero"><h2>Experimente como aluno e treinador</h2><p>Abra uma ficha fictícia, registre uma série e revise o treino.</p><button id="demo" class="secondary">Conhecer a demonstração</button></div><h2>Entrar no piloto</h2>'+input('server','Endereço do servidor','http://10.0.2.2:8000','url')+input('code','Código privado de acesso','','password')+'<button id="enter">Entrar</button><p class="muted"><small>Peça o código ao seu treinador. Nesta fase, use somente dados de teste.</small></p>');
- button('enter',async()=>{origin=$('#server').value.trim().replace(/\/+$/,'');token=$('#code').value.trim();me=await api('GET','/me');catalog=await api('GET','/catalog');window.TrackFitNative?.bindPush?.('');shell();await home();});
+ pushBinding=null;clearInterval(poller);offline=false;catalog=[];me=null;token='';demo=false;announced.clear();generation=null;$('#nav').hidden=true;$('#logout').hidden=true;
+ page('<h1>Seu treino no TrackFit</h1><div class="hero"><h2>Experimente como aluno e treinador</h2><p>Abra uma ficha fictícia, registre uma série e revise o treino.</p><button id="demo" class="secondary">Conhecer a demonstração</button></div><h2>Entrar no piloto</h2>'+input('server','Endereço do servidor',window.TrackFitNative?.lastServer?.()||'http://10.0.2.2:8000','url')+input('code','Código privado de acesso','','password')+'<button id="enter">Entrar</button><p class="muted"><small>Peça o código ao seu treinador. Nesta fase, use somente dados de teste.</small></p>');
+ if(window.TrackFitNative){
+   $('#enter').insertAdjacentHTML('afterend','<button id="resumeOffline" class="secondary">Abrir treino baixado</button>');
+   button('resumeOffline',()=>{
+     origin=$('#server').value.trim().replace(/\/+$/,'');token=$('#code').value.trim();
+     const saved=readDownload();
+     if(!saved||!token)throw Error('Nenhum treino baixado para esse endereço e código de aluno.');
+     offline=true;me={id:saved.userId,role:'student'};catalog=saved.catalog;
+     $('#logout').hidden=false;
+     sessionView(saved.session,saved.days);
+   });
+ }
+ button('enter',async()=>{origin=$('#server').value.trim().replace(/\/+$/,'');token=$('#code').value.trim();me=await api('GET','/me');catalog=await api('GET','/catalog');window.TrackFitNative?.rememberServer?.(origin);window.TrackFitNative?.bindPush?.('');shell();await home();});
  button('demo',async()=>{demo=true;catalog=[];resetDemo();me={name:'Pedro • demonstração',role:'trainer',provider:'demo'};shell();await home();});
 }
 function shell(){
@@ -120,11 +153,12 @@ async function detail(id){
  const [p, currentCatalog]=await Promise.all([api('GET','/plans/'+id),demo?catalog:api('GET','/catalog')]);
  if(me!==account)return;
  catalog=currentCatalog;const trainer=me.role==='trainer';
+ if(!trainer&&!demo&&p.state==='suspended'){const saved=readDownload();if(saved?.session.plan===id)clearDownload(saved.session.id);}
  page(`<span class="badge ${p.state}">${esc(labels[p.state])}</span><h1>${esc(p.student_name)}</h1><p class="muted">Ficha • versão ${p.version}</p><div class="notice">${esc(p.note)}</div>${trainer?`<details><summary>Ver avaliação</summary><div class="card">${Object.entries({Idade:p.profile.age,Objetivo:p.profile.goal,Experiência:p.profile.experience,Dias:p.profile.days,Minutos:p.profile.minutes,Local:p.profile.equipment,'Requer avaliação':p.profile.needs_review?'Sim':'Não',Observações:p.profile.limitations||'Nenhuma'}).map(([k,v])=>`<div class="summary"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join('')}</div></details>`:''}${daysHtml(p.days)}${!p.days.length?'<div class="empty">Seu treinador precisa concluir a avaliação antes de liberar os exercícios.</div>':''}<div id="actions"></div><div id="supportLink"></div>`);
  if(!demo){$('#supportLink').innerHTML='<button class="secondary" id="openSupport">Conversa sobre esta ficha</button>';button('openSupport',()=>conversation(id));}
  if(trainer){$('#actions').innerHTML='<button id="approve">Marcar como revisada</button><button id="edit" class="secondary">Editar ficha completa</button><button id="suspend" class="danger">Suspender ficha</button>';button('approve',()=>reviewNote(p,'approve'));button('edit',()=>editPlan(p));button('suspend',()=>reviewNote(p,'suspend'));}
  else if(['released','reviewed'].includes(p.state)){
- $('#actions').innerHTML=select('day','Qual treino fará agora?',p.days.map((d,i)=>[i,esc(d.title)]))+'<button id="start">Iniciar treino</button>';const requestId=uuid();button('start',async()=>{const s=await api('POST',`/plans/${id}/sessions`,{request_id:requestId,expected_version:p.version,day:Number($('#day').value)});sessionView(s);});}
+ $('#actions').innerHTML=select('day','Qual treino fará agora?',p.days.map((d,i)=>[i,esc(d.title)]))+'<button id="start">Iniciar treino</button>';const requestId=uuid();button('start',async()=>{const s=await api('POST',`/plans/${id}/sessions`,{request_id:requestId,expected_version:p.version,day:Number($('#day').value)});sessionView(s,p.days);});}
 }
 async function supportInbox(){
  const rows=await api('GET','/support');
@@ -224,7 +258,9 @@ window.receivePush=async(binding,deviceToken,error)=>{
  }catch(e){toast(e.message);}
 };
 async function notifications(){const rows=await api('GET','/notifications');page('<span class="eyebrow">ACOMPANHAMENTO</span><h1>Seus avisos.</h1><p class="muted">Consulte as mensagens de suporte e as atualizações da ficha.</p><div id="pushAction"></div><div id="alerts"></div>');if(!demo){$('#pushAction').innerHTML='<button id="push">Ativar avisos com o app fechado</button>';button('push',enablePush);}for(const n of rows){const el=document.createElement('div');el.className='card';el.innerHTML='<span class="badge">'+(n.seen?'Lido':'Novo')+'</span><p>'+esc(n.message)+'</p><button>'+(n.kind==='support'?'Abrir conversa':'Ver ficha')+'</button>';el.querySelector('button').onclick=async()=>{try{await api('POST',`/notifications/${n.id}/read`);if(n.kind==='support')await conversation(n.plan);else await detail(n.plan);}catch(e){toast(e.message);}};$('#alerts').append(el);}if(!rows.length)$('#alerts').innerHTML='<p class="empty">Nenhum aviso por enquanto.</p>';}
-async function history(){const rows=await api('GET','/sessions');page('<span class="eyebrow">SEU REGISTRO</span><h1>Histórico de treinos.</h1><div id="sessions"></div>');for(const s of rows){const el=document.createElement('div');el.className='card';el.innerHTML='<span class="badge">'+esc({active:'Em andamento',finished:'Concluído',suspended:'Suspenso'}[s.state])+'</span><h2>'+esc(s.snapshot.title)+'</h2><p>Ficha versão '+s.version+'</p><button>Abrir registro</button>';el.querySelector('button').onclick=()=>sessionView(s);$('#sessions').append(el);}if(!rows.length)$('#sessions').innerHTML='<p class="empty">Os treinos iniciados aparecerão aqui.</p>';}
+async function history(){const account=me;const rows=await api('GET','/sessions');if(me!==account)return;
+ if(!demo){const saved=readDownload();if(saved&&rows.some(s=>s.id===saved.session.id&&s.state!=='active'))clearDownload(saved.session.id);}
+ page('<span class="eyebrow">SEU REGISTRO</span><h1>Histórico de treinos.</h1><div id="sessions"></div>');for(const s of rows){const el=document.createElement('div');el.className='card';el.innerHTML='<span class="badge">'+esc({active:'Em andamento',finished:'Concluído',suspended:'Suspenso'}[s.state])+'</span><h2>'+esc(s.snapshot.title)+'</h2><p>Ficha versão '+s.version+'</p><button>Abrir registro</button>';el.querySelector('button').onclick=()=>sessionView(s);$('#sessions').append(el);}if(!rows.length)$('#sessions').innerHTML='<p class="empty">Os treinos iniciados aparecerão aqui.</p>';}
 function finishPayload() {
  const sets=[];
  for(const row of document.querySelectorAll('.set-row')){
@@ -238,10 +274,15 @@ function finishPayload() {
  if(!sets.length)throw Error('Registre ao menos uma série realizada.');
  return {sets,note:$('#note').value};
 }
-function sessionView(s){
+function sessionView(s,planDays){
  const native=demo?null:window.TrackFitNative;
  const scope=JSON.stringify([origin,me.id,s.id]);
  const viewUser=me;
+ let downloadMessage='';
+ if(native && s.state==='active' && !offline){
+   downloadMessage=saveDownload(s,planDays)?'Treino baixado neste aparelho. Para reabrir sem sinal, use seu código em Abrir treino baixado.':'O download falhou. Mantenha o treino aberto e tente novamente pelo histórico.';
+ }
+ if(native && s.state!=='active')clearDownload(s.id);
  let pending=null, editing=null, unreadable=false;
  if(s.state==='active'){
    const saved=native?.loadFinish?.(scope);
@@ -257,6 +298,17 @@ function sessionView(s){
 
  page('<span class="eyebrow">TREINO • VERSÃO '+s.version+'</span><h1>'+esc(s.snapshot.title)+'</h1><div class="notice">Registre somente o que realizou. A carga não é sugerida automaticamente. Zero significa ausência de carga externa. Campos vazios não são registrados.</div><div id="sets"></div>'+ (s.state==='active'?'<label for="note">Observações</label><textarea id="note" maxlength="1000"></textarea><p id="saveState" role="status"></p><button id="finish">Salvar treino realizado</button>':'<p>Este registro está '+esc(s.state==='finished'?'concluído':'suspenso')+'.</p>'));
  for(let i=0;i<s.snapshot.exercises.length;i++){const e=s.snapshot.exercises[i];const box=document.createElement('div');box.className='card';box.innerHTML='<h2>'+esc(e.name)+'</h2><p>'+esc(e.instructions)+'</p><small>Referência: '+e.sets+' × '+e.reps+' • '+e.rest_seconds+'s de descanso</small>'+catalogHelp(e.exercise_id);for(let j=0;j<e.sets;j++){const actual=(s.actual||pending||editing)?.sets.find(x=>x.exercise_index===i&&x.set_index===j);const row=document.createElement('div');row.className='row set-row';row.dataset.exercise=i;row.dataset.set=j;row.innerHTML='<div><label>Série '+(j+1)+' • kg</label><input class="weight" maxlength="16" inputmode="decimal" value="'+esc(actual?.weight_kg??'')+'" '+(s.state!=='active'?'disabled':'')+'></div><div><label>Repetições realizadas</label><input class="reps" type="number" value="'+esc(actual?.reps??'')+'" '+(s.state!=='active'?'disabled':'')+'></div>';box.append(row);}$('#sets').append(box);}
+ if(downloadMessage||offline){
+   const banner=document.createElement('p');
+   banner.className='notice';
+   banner.textContent=offline?'Treino baixado • versão '+s.version+'. Alterações do treinador só chegam com conexão.':downloadMessage;
+   $('#sets').before(banner);
+ }
+ if(offline && planDays?.length){
+   const full=document.createElement('details');
+   full.innerHTML='<summary>Consultar ficha baixada</summary>'+daysHtml(planDays);
+   $('#sets').before(full);
+ }
  if(s.state!=='active')return;
  const finishButton=$('#finish'), status=$('#saveState');
  function retryState(message){
@@ -289,15 +341,29 @@ function sessionView(s){
      if(native?.storeFinish&&!native.storeFinish(scope,JSON.stringify(body)))throw Error('Não foi possível guardar a tentativa neste aparelho. Os campos continuam disponíveis.');
      pending=body;
    }
+   if(offline&&!navigator.onLine){retryState('Treino guardado no aparelho. Reconecte para sincronizar.');return;}
    retryState('Aguardando confirmação do servidor…');
    let result;
    try{result=await api('POST','/sessions/'+s.id+'/finish',pending);}
-   catch(error){status.textContent='Gravação ainda não confirmada. Reconecte e tente novamente com os mesmos dados. Se o treino foi suspenso, consulte o histórico.';throw error;}
+   catch(error){
+     if(me!==viewUser||!finishButton.isConnected)return;
+     if([401,403,404,409].includes(error.status)){
+       clearDownload(s.id);
+       status.textContent='Servidor: '+error.message+' O registro local foi preservado. Entre online e consulte o histórico.';
+       return;
+     }
+     status.textContent='Gravação ainda não confirmada. Reconecte e tente novamente com os mesmos dados. Se o treino foi suspenso, consulte o histórico.';throw error;}
    native?.storeFinish?.(scope,'');
    if(me!==viewUser||!finishButton.isConnected)return;
+   clearDownload(s.id);
+   if(offline){offline=false;sessionView(result);toast('Treino sincronizado com o servidor.');return;}
    try{await history();}catch{sessionView(result);toast('Treino salvo. O histórico completo poderá ser atualizado depois.');}
  });
 }
+window.addEventListener('online',()=>{
+ const finish=$('#finish');
+ if(offline && finish && !finish.disabled && $('#note')?.disabled)finish.click();
+});
 // Isolated offline walkthrough: never calls the server; all contents are fictional.
 let demoPlans=[],demoTemplates=[],demoSessions=[],demoAlerts=[];
 const sampleDay=()=>({title:'Treino demonstrativo',exercises:[{name:'Exercício ilustrativo A',sets:2,reps:10,rest_seconds:60,instructions:'Exemplo de interface. Não executar como prescrição.'},{name:'Exercício ilustrativo B',sets:2,reps:12,rest_seconds:60,instructions:'O treinador define exercícios e orientações reais.'}]});

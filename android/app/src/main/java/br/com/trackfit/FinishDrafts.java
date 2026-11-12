@@ -42,7 +42,7 @@ final class FinishDrafts {
         try {
             String id = address(scope);
             if (data.isEmpty()) return records.edit().remove(id).commit();
-            if (data.length() > 18000) return false;
+            if (data.length() > 256000) return false;
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.ENCRYPT_MODE,key());
             cipher.updateAAD(id.getBytes(StandardCharsets.UTF_8));

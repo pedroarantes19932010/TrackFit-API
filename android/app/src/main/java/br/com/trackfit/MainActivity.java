@@ -49,6 +49,13 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 33) requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},1);
     }
     private class Bridge {
+        @JavascriptInterface public String lastServer() {
+            return getSharedPreferences("connection", MODE_PRIVATE).getString("origin", "");
+        }
+        @JavascriptInterface public void rememberServer(String origin) {
+            if (origin != null && origin.length() <= 2048)
+                getSharedPreferences("connection", MODE_PRIVATE).edit().putString("origin", origin).apply();
+        }
         @JavascriptInterface public void openVideo(String id) {
             if (id != null && id.matches("[A-Za-z0-9_-]{11}"))
                 runOnUiThread(() -> startActivity(new android.content.Intent(MainActivity.this, VideoActivity.class).putExtra("video", id)));

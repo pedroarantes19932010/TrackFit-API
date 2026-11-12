@@ -45,3 +45,10 @@ Ao criar ou editar um modelo, adicione um exercício e selecione a referência d
 O aluno abre **Conversa sobre esta ficha** e envia a dúvida. Em **Conversas sobre fichas**, o treinador vê quem escreveu por último, abre a conversa, responde e pode voltar para editar a ficha. Cada mensagem guarda a versão existente no momento do envio. Em **Avisos**, aluno e treinador podem abrir diretamente a conversa que recebeu uma mensagem. Abrir a conversa marca seus avisos como lidos. Para receber avisos com o aplicativo fechado, use uma compilação vinculada ao Firebase e ative essa opção no aparelho.
 
 No piloto conectado, abra **Vídeos**, escolha o exercício, cole o link do YouTube e informe o canal e a categoria. Após salvar, o aluno encontra o vídeo em **Consultar catálogo** na ficha ou durante o treino. Se a incorporação estiver indisponível, o player oferece **Abrir no YouTube**. O treinador pode atualizar um vídeo salvando o mesmo link ou removê-lo do exercício.
+
+## Usar o treino na academia sem sinal
+
+1. Entre com o código do aluno enquanto houver internet. Abra a ficha liberada, escolha o dia e toque em **Iniciar treino**. Aguarde **Treino baixado neste aparelho** antes de desconectar.
+2. Se fechar o app, abra-o, informe o mesmo código e toque em **Abrir treino baixado**. O endereço do último servidor fica preenchido. A sessão do dia aceita cargas, repetições e observações. A opção **Consultar ficha baixada** mostra também os demais dias baixados. Apenas o dia iniciado aceita registros.
+3. Toque em **Salvar treino realizado**. Sem conexão, o registro permanece no aparelho. Com a tela offline aberta e um envio pendente, o app tenta enviar quando o Android informa que a rede voltou. Você também pode tocar em **Tentar confirmar novamente**. Aguarde a confirmação do servidor.
+4. Revisões e suspensões feitas pelo treinador só chegam com internet. O servidor confere o estado da sessão ao receber o registro. O download da sessão é removido após a confirmação. Mensagens, vídeos do YouTube e novas sessões precisam de conexão.

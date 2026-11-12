@@ -117,11 +117,26 @@ async function connected(page) {
   assert.equal(await page.locator('.weight').inputValue(),'12,5');
   assert.equal(await page.locator('.reps').inputValue(),'');
   assert.equal(await page.locator('#note').inputValue(),'Parcial do teste');
-  await page.locator('.reps').fill('10');
   execFileSync('docker',['stop','trackfit-emulator-restored']);
   try {
+    await page.reload();
+    assert.equal(await page.locator('#server').inputValue(),base);
+    await page.locator('#code').fill('codigo-de-outra-pessoa');
+    await page.locator('#resumeOffline').click();
+    await page.getByText(/Nenhum treino baixado/).waitFor();
+    await page.locator('#code').fill(student.access_code);
+    await page.locator('#resumeOffline').click();
+    await page.getByText('Consultar ficha baixada').click();
+    assert.equal(await page.locator('.weight').inputValue(),'12,5');
+    assert.equal(await page.locator('#note').inputValue(),'Parcial do teste');
+    await page.locator('.reps').fill('10');
     await page.locator('#finish').click();
-    await page.getByText(/Gravação ainda não confirmada/).waitFor();
+    await page.getByText(/Gravação ainda não confirmada|Treino guardado no aparelho/).waitFor();
+    await page.reload();
+    await page.locator('#code').fill(student.access_code);
+    await page.locator('#resumeOffline').click();
+    await page.getByText(/Os dados desta tentativa foram recuperados/).waitFor();
+    assert.equal(await page.locator('.weight').inputValue(),'12.5');
   } finally {
     execFileSync('docker',['start','trackfit-emulator-restored']);
     for(let attempt=0;attempt<40;attempt++){
@@ -129,14 +144,6 @@ async function connected(page) {
       await new Promise(resolve=>setTimeout(resolve,250));
     }
   }
-  await page.reload();
-  await page.locator('#server').fill(base);
-  await page.locator('#code').fill(student.access_code);
-  await page.locator('#enter').click();
-  await page.locator('#historyNav').click();
-  await page.locator('#sessions button').click();
-  await page.getByText(/Os dados desta tentativa foram recuperados/).waitFor();
-  assert.equal(await page.locator('.weight').inputValue(),'12.5');
   // Drop only the finish acknowledgement after the real server committed it.
   await page.evaluate(()=>{
     const original=window.receiveNative;
@@ -151,7 +158,7 @@ async function connected(page) {
   await page.locator('#finish').click();
   await page.getByText(/Gravação ainda não confirmada/).waitFor();
   await page.locator('#finish').click();
-  await page.locator('#sessions button').waitFor();
+  await page.getByText('Treino sincronizado com o servidor.').waitFor();
   const records=await (await fetch(base+'/sessions',{headers:{Authorization:'Bearer '+student.access_code}})).json();
   assert.equal(records.length,1);
   assert.deepEqual(records[0].actual.sets,[{exercise_index:0,set_index:0,weight_kg:12.5,reps:10}]);
