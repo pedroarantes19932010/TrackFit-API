@@ -1,6 +1,7 @@
 """Uma conversa por ficha, restrita ao aluno e ao treinador responsável."""
 import time
-from uuid import UUID
+from uuid import UUID, uuid4
+from server.push import enqueue
 from fastapi import Depends, HTTPException
 from pydantic import Field
 from server.models import Strict
@@ -11,6 +12,7 @@ CREATE TABLE IF NOT EXISTS support_messages(
  sender TEXT NOT NULL, role TEXT NOT NULL, version INTEGER NOT NULL,
  request_id TEXT NOT NULL, message TEXT NOT NULL, created REAL NOT NULL,
  UNIQUE(sender,request_id));
+CREATE TABLE IF NOT EXISTS support_alerts(event TEXT PRIMARY KEY REFERENCES notifications(id));
 CREATE INDEX IF NOT EXISTS support_plan ON support_messages(plan,seq);
 """
 
@@ -42,8 +44,9 @@ def install(app, db, authenticate, get_plan):
 
     @app.get("/plans/{plan_id}/support")
     def messages(plan_id: str,user=Depends(authenticate)):
-        with db() as conn:
+        with db(True) as conn:
             allowed(conn,plan_id,user)
+            conn.execute("UPDATE notifications SET seen=1 WHERE plan=? AND trainer=? AND id IN (SELECT event FROM support_alerts)",(plan_id,user["id"]))
             return [dict(r) for r in conn.execute("SELECT role,version,message,created FROM support_messages WHERE plan=? ORDER BY seq",(plan_id,))]
 
     @app.post("/plans/{plan_id}/support")
@@ -58,4 +61,10 @@ def install(app, db, authenticate, get_plan):
                 return {"ok":True}
             conn.execute("""INSERT INTO support_messages(plan,sender,role,version,request_id,message,created)
                          VALUES(?,?,?,?,?,?,?)""",(plan_id,user["id"],user["role"],plan["version"],str(body.request_id),body.message,time.time()))
+            recipient = plan["trainer"] if user["role"] == "student" else plan["student"]
+            event = str(uuid4())
+            conn.execute("INSERT INTO notifications VALUES(?,?,?,?,?,0)",
+                         (event,recipient,plan_id,"Nova mensagem no suporte da ficha.",time.time()))
+            conn.execute("INSERT INTO support_alerts VALUES(?)",(event,))
+            enqueue(conn,event,recipient)
         return {"ok":True}

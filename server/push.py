@@ -74,7 +74,11 @@ def deliver_one(db, send):
     with db(True) as conn:
         conn.execute("DELETE FROM push_devices WHERE expires<=?", (now,))
         conn.execute("""DELETE FROM push_jobs WHERE binding NOT IN (SELECT binding FROM push_devices)
-                      OR event NOT IN (SELECT id FROM notifications WHERE seen=0 AND created>?)""", (now-86400,))
+                      OR NOT EXISTS (
+                      SELECT 1 FROM notifications n JOIN plans p ON p.id=n.plan
+                      JOIN trainer_students t ON t.trainer_id=p.trainer AND t.student_id=p.student
+                      JOIN push_devices d ON d.binding=push_jobs.binding AND d.trainer=n.trainer
+                      WHERE n.id=push_jobs.event AND n.seen=0 AND n.created>?)""", (now-86400,))
         row = conn.execute("""SELECT j.event,j.binding,j.attempts,d.token FROM push_jobs j
             JOIN push_devices d USING(binding) WHERE available<=? ORDER BY available LIMIT 1""",(now,)).fetchone()
         if not row:

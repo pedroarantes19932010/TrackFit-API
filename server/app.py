@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from trackfit_api.identity import current_user, request_database
 from trackfit_api.auth_routes import router as auth_router
 from trackfit_api.workout_routes import router as workout_router
-from server import push, timeline, support
+from server import push, timeline, support, videos
 from trackfit_api.catalog_routes import router as catalog_router
 from datetime import datetime
 from server.accounts import add_code_account, prepare_accounts
@@ -70,11 +70,11 @@ def create_app(db_path=None, mode=None, chooser=None):
 
     with db(True) as conn:
         prepare_accounts(conn)
-        for statement in (SCHEMA + push.SCHEMA + support.SCHEMA).split(";"):
+        for statement in (SCHEMA + push.SCHEMA + support.SCHEMA + videos.SCHEMA).split(";"):
             if statement.strip():
                 conn.execute(statement)
     push_enabled = os.getenv("TRACKFIT_PUSH") == "fcm"
-    app = FastAPI(title="TrackFit — piloto", version="0.2.0", lifespan=push.worker_lifespan(db,push_enabled))
+    app = FastAPI(title="TrackFit — piloto", version="0.4.0", lifespan=push.worker_lifespan(db,push_enabled))
     app.state.db = db
 
     app.include_router(catalog_router)
@@ -273,7 +273,7 @@ def create_app(db_path=None, mode=None, chooser=None):
             return timeline.history(conn,user,30*page,30)
 
     @app.post("/push/devices")
-    def register_device(body: push.Device, authorization: str = Header(), user=Depends(trainer)):
+    def register_device(body: push.Device, authorization: str = Header(), user=Depends(auth)):
         if not push_enabled:
             raise HTTPException(503, "Envio em segundo plano ainda não configurado no servidor.")
         with db(True) as conn:
@@ -285,12 +285,12 @@ def create_app(db_path=None, mode=None, chooser=None):
         return {"ok":True}
 
     @app.get("/notifications")
-    def notifications(user=Depends(trainer)):
+    def notifications(user=Depends(auth)):
         with db() as conn:
-            return [dict(r) for r in conn.execute("SELECT * FROM notifications WHERE trainer=? ORDER BY created DESC LIMIT 100", (user["id"],))]
+            return [dict(r) for r in conn.execute("SELECT n.*, CASE WHEN s.event IS NULL THEN 'plan' ELSE 'support' END AS kind FROM notifications n JOIN plans p ON p.id=n.plan JOIN trainer_students t ON t.trainer_id=p.trainer AND t.student_id=p.student LEFT JOIN support_alerts s ON s.event=n.id WHERE n.trainer=? ORDER BY n.created DESC LIMIT 100", (user["id"],))]
 
     @app.post("/notifications/{notification_id}/read")
-    def mark_read(notification_id: str, user=Depends(trainer)):
+    def mark_read(notification_id: str, user=Depends(auth)):
         with db(True) as conn:
             if conn.execute("UPDATE notifications SET seen=1 WHERE id=? AND trainer=?", (notification_id,user["id"])).rowcount != 1:
                 raise HTTPException(404, "Aviso não encontrado.")
@@ -350,5 +350,6 @@ def create_app(db_path=None, mode=None, chooser=None):
             conn.execute("UPDATE training_sessions SET state='finished',actual=? WHERE id=?", (actual,session_id))
             return show_session(conn.execute("SELECT * FROM training_sessions WHERE id=?", (session_id,)).fetchone())
 
+    videos.install(app, db, auth, trainer)
     support.install(app, db, auth, get_plan)
     return app

@@ -6,6 +6,7 @@
         <service android:name=".ReviewMessages" android:exported="false">
             <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT"/></intent-filter>
         </service>
+        <activity android:name=".VideoActivity" android:exported="false"/>
         <activity android:name=".MainActivity" android:exported="true" android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
         </activity>

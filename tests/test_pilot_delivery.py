@@ -79,9 +79,35 @@ class PilotDelivery(unittest.TestCase):
             self.assertEqual(actual['sets'][0]['weight_kg'],12.5)
         self.assertEqual(self.client.get("/history",headers={"Authorization":"Bearer other"}).json(),[])
 
-    def test_student_cannot_register_push(self):
+    def test_student_push_requires_configured_service(self):
         res=self.client.post("/push/devices",headers=self.student,json={"binding":str(uuid4()),"token":"another-fictitious-device"})
-        self.assertEqual(res.status_code,403)
+        self.assertEqual(res.status_code,503)
+
+    def test_support_recipient_and_retry(self):
+        path = "/plans/"+self.generate()["id"]+"/support"
+        for author, reader in [(self.student,self.trainer),(self.trainer,self.student)]:
+            body = {"message":"Mensagem de teste","request_id":str(uuid4())}
+            for _ in range(2):
+                self.assertEqual(self.client.post(path,headers=author,json=body).status_code,200)
+            def alerts():
+                return [n for n in self.client.get("/notifications",headers=reader).json() if n["kind"]=="support"]
+            self.assertEqual([n["seen"] for n in alerts()],[0])
+            self.assertEqual(self.client.get(path,headers=reader).status_code,200)
+            self.assertEqual([n["seen"] for n in alerts()],[1])
+
+    def test_curated_videos_by_trainer(self):
+        path="/catalog/seated_row/videos"
+        video={"kind":"tips","creator_name":"Canal teste","youtube_id":"abc_DEF-123"}
+        def videos(headers):
+            return next(e for e in self.client.get("/catalog",headers=headers).json() if e["exercise_id"]=="seated_row")["videos"]
+        self.assertEqual(self.client.post(path,headers=self.student,json=video).status_code,403)
+        self.assertEqual(self.client.post(path,headers=self.trainer,json=video|{"youtube_id":"invalid"}).status_code,422)
+        for _ in range(2):
+            self.assertEqual(self.client.post(path,headers=self.trainer,json=video).status_code,200)
+        self.assertEqual(videos(self.student),[video])
+        self.assertEqual(videos({"Authorization":"Bearer other"}),[])
+        self.assertEqual(self.client.post(path+"/abc_DEF-123/remove",headers=self.trainer).status_code,200)
+        self.assertEqual(videos(self.student),[])
 
 
 class AIContract(unittest.TestCase):

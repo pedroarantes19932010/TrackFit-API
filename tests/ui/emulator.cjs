@@ -26,7 +26,7 @@ async function run(page) {
   await click('#switchDemo');
   await click('#alertsNav');
   await waitText('Ficha completa de Ana Demo disponível.');
-  await page.locator('#alerts button').first().click();
+  await page.locator('#alerts').getByRole('button',{name:'Ver ficha'}).first().click();
   await click('#edit');
   await page.locator('#title0').fill('Ficha revisada no Android');
   await page.locator('#note').fill('Revisão fictícia do teste');
@@ -72,6 +72,13 @@ async function connected(page) {
     await page.locator('#code').fill(code);
     await page.locator('#enter').click();
   }
+  await login(trainer);
+  await page.locator('#videosNav').click();
+  await page.locator('#exercise').selectOption('seated_row');
+  await page.locator('#creator').fill('Canal fictício');
+  await page.locator('#link').fill('https://youtu.be/abc_DEF-123');
+  await page.locator('#saveVideo').click();
+  await page.locator('#curated').getByText(/Canal fictício/).waitFor();
   await login(student.access_code);
   await page.locator('#newNav').click();
   await page.locator('#age').fill('30');
@@ -79,6 +86,15 @@ async function connected(page) {
   await page.locator('#consent').check();
   await page.locator('#generate').click();
   await page.getByText('Consultar catálogo',{exact:true}).click();
+  await page.getByRole('button',{name:/Canal fictício/}).click();
+  let opened=false;
+  for(let attempt=0;attempt<20;attempt++){
+    const current=execFileSync('adb',['shell','dumpsys','activity','activities'],{encoding:'utf8'});
+    if(current.split('\n').some(line=>/ResumedActivity|topResumedActivity/.test(line)&&line.includes('VideoActivity'))){opened=true;break;}
+    await new Promise(resolve=>setTimeout(resolve,250));
+  }
+  assert.ok(opened,'O player de vídeo deve abrir em sua própria tela');
+  execFileSync('adb',['shell','input','keyevent','4']);
   await page.locator('#openSupport').click();
   await page.locator('#question').fill('Dúvida fictícia sobre o aparelho');
   await page.locator('#sendMessage').click();
@@ -139,11 +155,16 @@ async function connected(page) {
   for (const title of ['Ficha da API anterior','Ficha do Android','Treino registrado'])
     await page.locator('#records summary').filter({hasText:title}).waitFor();
   await page.locator('#alertsNav').click();
-  await page.locator('#alerts button').first().click();
+  await page.locator('#alerts').getByRole('button',{name:'Ver ficha'}).first().click();
   await page.locator('#approve').click();
   await page.locator('#note').fill('Revisado durante o teste.');
   await page.locator('#save').click();
   await page.getByText('Ficha • versão 2',{exact:true}).waitFor();
+  await login(student.access_code);
+  await page.locator('#alertsNav').click();
+  await page.getByRole('button',{name:'Abrir conversa'}).click();
+  await page.locator('#messages').getByText('Resposta do treinador para teste').waitFor();
+
 }
 (async () => {
   const devices = await android.devices();

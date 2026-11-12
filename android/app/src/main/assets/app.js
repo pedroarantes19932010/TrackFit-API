@@ -26,17 +26,19 @@ function login(){
  if(me && !demo) window.TrackFitNative?.bindPush?.('');
  pushBinding=null;clearInterval(poller);me=null;token='';demo=false;announced.clear();generation=null;$('#nav').hidden=true;$('#logout').hidden=true;
  page('<h1>Seu treino no TrackFit</h1><div class="hero"><h2>Experimente como aluno e treinador</h2><p>Abra uma ficha fictícia, registre uma série e revise o treino.</p><button id="demo" class="secondary">Conhecer a demonstração</button></div><h2>Entrar no piloto</h2>'+input('server','Endereço do servidor','http://10.0.2.2:8000','url')+input('code','Código privado de acesso','','password')+'<button id="enter">Entrar</button><p class="muted"><small>Peça o código ao seu treinador. Nesta fase, use somente dados de teste.</small></p>');
- button('enter',async()=>{origin=$('#server').value.trim().replace(/\/+$/,'');token=$('#code').value.trim();me=await api('GET','/me');catalog=await api('GET','/v1/exercises').catch(()=>[]);window.TrackFitNative?.bindPush?.('');shell();await home();});
+ button('enter',async()=>{origin=$('#server').value.trim().replace(/\/+$/,'');token=$('#code').value.trim();me=await api('GET','/me');catalog=await api('GET','/catalog');window.TrackFitNative?.bindPush?.('');shell();await home();});
  button('demo',async()=>{demo=true;catalog=[];resetDemo();me={name:'Pedro • demonstração',role:'trainer',provider:'demo'};shell();await home();});
 }
 function shell(){
  $('#logout').hidden=false;$('#nav').hidden=false;
  const trainer=me.role==='trainer';
  $('#nav').innerHTML=trainer?'<button id="homeNav">Visão geral</button><button id="modelsNav">Modelos</button><button id="alertsNav">Avisos</button>':'<button id="homeNav">Minhas fichas</button><button id="newNav">Avaliação</button><button id="historyNav">Histórico</button>';
+ if (!demo && !trainer) $('#nav').insertAdjacentHTML('beforeend','<button id="alertsNav">Avisos</button>');
+ if (!demo && trainer) { $('#nav').insertAdjacentHTML('beforeend','<button id="videosNav">Vídeos</button>'); button('videosNav',videoEditor); }
  button('homeNav',home);button('modelsNav',templates);button('alertsNav',notifications);button('newNav',assessment);button('historyNav',history);
- clearInterval(poller);if(trainer){poller=setInterval(()=>pollNotifications().catch(()=>{}),30000);pollNotifications().catch(()=>{});}
+ clearInterval(poller);if(trainer||!demo){poller=setInterval(()=>pollNotifications().catch(()=>{}),30000);pollNotifications().catch(()=>{});}
 }
-async function pollNotifications(){if(!me||me.role!=='trainer')return;const rows=await api('GET','/notifications');for(const n of rows){if(!n.seen&&!announced.has(n.id)){announced.add(n.id);if(!demo)window.TrackFitNative?.notifyReview(n.id);}}}
+async function pollNotifications(){if(!me)return;const account=me;const rows=await api('GET','/notifications');if(me!==account)return;const count=rows.filter(n=>!n.seen).length;if($('#alertsNav'))$('#alertsNav').textContent=count?'Avisos ('+count+')':'Avisos';for(const n of rows){if(!n.seen&&!announced.has(n.id)){announced.add(n.id);if(!demo)window.TrackFitNative?.notifyReview(n.id);}}}
 async function home(){
  const plans=await api('GET','/plans'), trainer=me.role==='trainer';
  page(`<span class="eyebrow">${trainer?'ÁREA DO TREINADOR':'ÁREA DO ALUNO'}</span><h1>Olá, ${esc(me.name.split(' ')[0])}.</h1><p class="muted">${trainer?'As fichas chegam completas. Você revisa e acompanha por aqui.':'Sua ficha e seu histórico, no mesmo lugar.'}</p>${me.provider==='demo'&&!demo?'<div class="notice">Servidor em modo demonstração: seleção por regras, sem IA real.</div>':''}<div class="hero"><small>${trainer?'PARA ACOMPANHAR':'SEU ESPAÇO'}</small><h2>${trainer?plans.filter(p=>['pending','released'].includes(p.state)).length+' fichas para revisar':'Vamos treinar?'}</h2><p>${trainer?'Revisões e avaliações individuais pendentes.':'Preencha a avaliação para receber sua ficha.'}</p></div>${demo?'<button id="switchDemo" class="secondary">Ver como '+(trainer?'aluno':'treinador')+'</button>':''}<button id="primary">${trainer?'Cadastrar aluno':'Preencher avaliação'}</button><h2>${trainer?'Fichas dos alunos':'Minhas fichas'}</h2><div id="plans"></div><div id="supportHome"></div><button id="timeline" class="secondary">Consultar histórico completo</button>`);
@@ -53,7 +55,52 @@ function assessment(){
 function catalogHelp(id){
  const entry=catalog.find(item=>item.exercise_id===id);
  if(!entry)return '';
- return '<details><summary>Consultar catálogo</summary><p>'+esc(entry.name)+' • '+esc(entry.equipment)+'</p><ul>'+entry.instructions.map(line=>'<li>'+esc(line)+'</li>').join('')+'</ul></details>';
+ return '<details><summary>Consultar catálogo</summary><p>'+esc(entry.name)+' • '+esc(entry.equipment)+'</p><ul>'+entry.instructions.map(line=>'<li>'+esc(line)+'</li>').join('')+'</ul>'+entry.videos.map(v=>'<button type="button" data-youtube="'+esc(v.youtube_id)+'">'+esc(videoKinds[v.kind])+' • '+esc(v.creator_name)+'</button>').join('')+'</details>';
+}
+const videoKinds={demonstration:'Demonstração',common_mistakes:'Erros comuns',tips:'Dicas'};
+app.addEventListener('click',event=>{
+ const id=event.target.closest('[data-youtube]')?.dataset.youtube;
+ if(id && /^[A-Za-z0-9_-]{11}$/.test(id))window.TrackFitNative?.openVideo(id);
+});
+function youtubeId(value){
+ const raw=value.trim(), valid=/^[A-Za-z0-9_-]{11}$/;
+ if(valid.test(raw))return raw;
+ try {
+   const url=new URL(raw), parts=url.pathname.split('/');
+   if(url.protocol==='https:'){
+     const id=url.hostname==='youtu.be'?parts[1]:
+       ['www.youtube.com','youtube.com','m.youtube.com'].includes(url.hostname)?
+       (url.pathname==='/watch'?url.searchParams.get('v'):['shorts','embed'].includes(parts[1])?parts[2]:''):'';
+     if(id && valid.test(id))return id;
+   }
+ }catch{}
+ throw Error('Informe o link do YouTube ou o identificador de 11 caracteres.');
+}
+async function videoEditor(selected){
+ catalog=await api('GET','/catalog');
+ page('<h1>Vídeos dos exercícios</h1>'+select('exercise','Exercício',catalog.map(e=>[e.exercise_id,e.name]))+
+     input('link','Link ou ID do YouTube')+input('creator','Nome do canal')+select('kind','Tipo de vídeo',Object.entries(videoKinds))+
+     '<button id="saveVideo">Salvar vídeo</button><div id="curated"></div>');
+ const exercise=$('#exercise');
+ if(selected)exercise.value=selected;
+ function render(){
+   const videos=catalog.find(e=>e.exercise_id===exercise.value)?.videos||[], list=$('#curated');
+   list.replaceChildren();
+   for(const v of videos){
+     const row=document.createElement('div');
+     row.className='card';
+     row.innerHTML='<button data-youtube="'+esc(v.youtube_id)+'">'+esc(videoKinds[v.kind])+' • '+esc(v.creator_name)+'</button><button class="secondary">Remover</button>';
+     row.lastElementChild.onclick=async()=>{try{const id=exercise.value;await api('POST','/catalog/'+id+'/videos/'+v.youtube_id+'/remove');await videoEditor(id);}catch(e){toast(e.message);}};
+     list.append(row);
+   }
+ }
+ exercise.onchange=render;render();
+ button('saveVideo',async()=>{
+   const id=exercise.value,creator=$('#creator').value.trim();
+   if(!creator)throw Error('Informe o nome do canal.');
+   await api('POST','/catalog/'+id+'/videos',{youtube_id:youtubeId($('#link').value),creator_name:creator,kind:$('#kind').value});
+   await videoEditor(id);
+ });
 }
 function daysHtml(days){return days.map(d=>`<div class="card"><h2>${esc(d.title)}</h2>${d.exercises.map(e=>`<div class="exercise"><strong>${esc(e.name)}</strong><span>${e.sets} séries × ${e.reps} repetições • ${e.rest_seconds}s descanso</span><small>${esc(e.instructions)}</small>${catalogHelp(e.exercise_id)}</div>`).join('')}</div>`).join('');}
 async function detail(id){
@@ -117,7 +164,7 @@ function addExercise(parent,e={name:'',sets:2,reps:10,rest_seconds:60,instructio
 }
 function readDays(){return [...document.querySelectorAll('.day-edit')].map((d,i)=>({title:$('#title'+i).value,exercises:[...d.querySelectorAll('.editor-row')].map(e=>({...e.dataset.catalogId?{exercise_id:e.dataset.catalogId}:{},name:e.querySelector('.ex-name').value,sets:Number(e.querySelector('.ex-sets').value),reps:Number(e.querySelector('.ex-reps').value),rest_seconds:Number(e.querySelector('.ex-rest').value),instructions:e.querySelector('.ex-instructions').value}))}));}
 function editPlan(p){page('<span class="eyebrow">REVISÃO PROFISSIONAL</span><h1>Ajustar ficha.</h1><p>A nova versão será usada nos próximos treinos. A sessão em andamento mantém sua ficha original.</p><div id="editor"></div><label for="note">O que você avaliou e alterou?</label><textarea id="note"></textarea><button id="save">Salvar e liberar versão revisada</button>');dayEditor(p.days.length?p.days:Array.from({length:p.profile.days},(_,i)=>({title:'Treino '+(i+1),exercises:[]})));button('save',async()=>{await api('POST',`/plans/${p.id}/review`,{action:'edit',expected_version:p.version,note:$('#note').value,days:readDays()});await detail(p.id);});}
-async function templates(){const rows=await api('GET','/templates');page('<span class="eyebrow">SUA BASE PROFISSIONAL</span><h1>Modelos de treino.</h1><p>Somente modelos aprovados podem ser selecionados automaticamente. Aprovar um modelo não aprova todas as fichas já geradas.</p><button id="newTemplate">Criar modelo</button><div id="templates"></div>');button('newTemplate',newTemplate);for(const t of rows){const el=document.createElement('div');el.className='card';el.innerHTML=`<span class="badge">${t.approved?'Aprovado para seleção':'Rascunho'}</span><h2>${esc(t.data.name)}</h2><p>${esc(t.data.goal)} • ${t.data.days.length} dias • ${t.data.minutes} min<br>${esc(t.data.experience)} • ${esc(t.data.equipment)} • ${t.data.min_age}–${t.data.max_age} anos</p><details><summary>Ver ficha completa</summary>${daysHtml(t.data.days)}</details><button>${t.approved?'Retirar da seleção automática':'Aprovar este modelo'}</button>`;el.querySelector('button').onclick=async()=>{try{await api('POST',`/templates/${t.id}/approval`,{approved:!t.approved});await templates();}catch(e){toast(e.message);}};$('#templates').append(el);}if(!rows.length)$('#templates').innerHTML='<p class="empty">Nenhum modelo. A liberação automática está desativada até você criar e aprovar um.</p>';}
+async function templates(){const rows=await api('GET','/templates');page('<span class="eyebrow">SUA BASE PROFISSIONAL</span><h1>Modelos de treino.</h1><p>Somente modelos aprovados podem ser selecionados automaticamente. Aprovar um modelo não aprova todas as fichas já geradas.</p><button id="newTemplate">Criar modelo</button><div id="templates"></div>');button('newTemplate',newTemplate);for(const t of rows){const el=document.createElement('div');el.className='card';el.innerHTML=`<span class="badge">${t.approved?'Aprovado para seleção':'Rascunho'}</span><h2>${esc(t.data.name)}</h2><p>${esc(t.data.goal)} • ${t.data.days.length} dias • ${t.data.minutes} min<br>${esc(t.data.experience)} • ${esc(t.data.equipment)} • ${t.data.min_age}–${t.data.max_age} anos</p><details><summary>Ver ficha completa</summary>${daysHtml(t.data.days)}</details><button>${t.approved?'Retirar da seleção automática':'Aprovar este modelo'}</button>`;el.lastElementChild.onclick=async()=>{try{await api('POST',`/templates/${t.id}/approval`,{approved:!t.approved});await templates();}catch(e){toast(e.message);}};$('#templates').append(el);}if(!rows.length)$('#templates').innerHTML='<p class="empty">Nenhum modelo. A liberação automática está desativada até você criar e aprovar um.</p>';}
 function newTemplate(){page('<span class="eyebrow">NOVO MODELO</span><h1>Sua ficha de referência.</h1>'+input('modelName','Nome do modelo')+select('goal','Objetivo',goals)+select('experience','Experiência',levels)+select('equipment','Equipamentos',equipment)+input('minutes','Duração estimada por treino (minutos)',40,'number')+'<div class="row"><div>'+input('minAge','Idade mínima',18,'number')+'</div><div>'+input('maxAge','Idade máxima',60,'number')+'</div></div>'+input('dayCount','Dias por semana',1,'number')+'<button id="makeDays" class="secondary">Preparar os dias</button><div id="editor"></div><button id="save">Salvar como rascunho</button>');dayEditor([{title:'Treino 1',exercises:[]}]);button('makeDays',()=>{const count=Number($('#dayCount').value);if(count<1||count>6||!Number.isInteger(count))throw Error('Escolha de 1 a 6 dias.');const current=readDays();if(count<current.length)throw Error('Para reduzir dias, abra um novo modelo. Isso evita apagar seu trabalho.');dayEditor(Array.from({length:count},(_,i)=>current[i]||{title:'Treino '+(i+1),exercises:[]}));});button('save',async()=>{await api('POST','/templates',{name:$('#modelName').value,goal:$('#goal').value,experience:$('#experience').value,equipment:$('#equipment').value,minutes:Number($('#minutes').value),min_age:Number($('#minAge').value),max_age:Number($('#maxAge').value),days:readDays()});await templates();});}
 async function timeline(pageNumber) {
  const rows=await api('GET','/history/page/'+pageNumber);
@@ -152,16 +199,16 @@ function enablePush(){
  window.TrackFitNative.enableReviewPush(pushBinding);
 }
 window.receivePush=async(binding,deviceToken,error)=>{
- if(binding!==pushBinding||!me||me.role!=='trainer'||demo)return;
+ if(binding!==pushBinding||!me||demo)return;
  if(error){toast(error);return;}
  try{
    await api('POST','/push/devices',{binding,token:deviceToken});
    if(binding!==pushBinding)return;
    window.TrackFitNative.bindPush(binding);
-   toast('Avisos de novas fichas ativados neste aparelho.');
+   toast('Avisos ativados neste aparelho.');
  }catch(e){toast(e.message);}
 };
-async function notifications(){const rows=await api('GET','/notifications');page('<span class="eyebrow">ACOMPANHAMENTO</span><h1>Seus avisos.</h1><p class="muted">As fichas chegam completas para revisão.</p><div id="pushAction"></div><div id="alerts"></div>');if(!demo){$('#pushAction').innerHTML='<button id="push">Ativar avisos com o app fechado</button>';button('push',enablePush);}for(const n of rows){const el=document.createElement('div');el.className='card';el.innerHTML='<span class="badge">'+(n.seen?'Lido':'Novo')+'</span><p>'+esc(n.message)+'</p><button>Ver ficha</button>';el.querySelector('button').onclick=async()=>{try{await api('POST',`/notifications/${n.id}/read`);await detail(n.plan);}catch(e){toast(e.message);}};$('#alerts').append(el);}if(!rows.length)$('#alerts').innerHTML='<p class="empty">Nenhum aviso por enquanto.</p>';}
+async function notifications(){const rows=await api('GET','/notifications');page('<span class="eyebrow">ACOMPANHAMENTO</span><h1>Seus avisos.</h1><p class="muted">Consulte as mensagens de suporte e as atualizações da ficha.</p><div id="pushAction"></div><div id="alerts"></div>');if(!demo){$('#pushAction').innerHTML='<button id="push">Ativar avisos com o app fechado</button>';button('push',enablePush);}for(const n of rows){const el=document.createElement('div');el.className='card';el.innerHTML='<span class="badge">'+(n.seen?'Lido':'Novo')+'</span><p>'+esc(n.message)+'</p><button>'+(n.kind==='support'?'Abrir conversa':'Ver ficha')+'</button>';el.querySelector('button').onclick=async()=>{try{await api('POST',`/notifications/${n.id}/read`);if(n.kind==='support')await conversation(n.plan);else await detail(n.plan);}catch(e){toast(e.message);}};$('#alerts').append(el);}if(!rows.length)$('#alerts').innerHTML='<p class="empty">Nenhum aviso por enquanto.</p>';}
 async function history(){const rows=await api('GET','/sessions');page('<span class="eyebrow">SEU REGISTRO</span><h1>Histórico de treinos.</h1><div id="sessions"></div>');for(const s of rows){const el=document.createElement('div');el.className='card';el.innerHTML='<span class="badge">'+esc({active:'Em andamento',finished:'Concluído',suspended:'Suspenso'}[s.state])+'</span><h2>'+esc(s.snapshot.title)+'</h2><p>Ficha versão '+s.version+'</p><button>Abrir registro</button>';el.querySelector('button').onclick=()=>sessionView(s);$('#sessions').append(el);}if(!rows.length)$('#sessions').innerHTML='<p class="empty">Os treinos iniciados aparecerão aqui.</p>';}
 function finishPayload() {
  const sets=[];

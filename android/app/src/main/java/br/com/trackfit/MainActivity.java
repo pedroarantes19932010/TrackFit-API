@@ -49,6 +49,10 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 33) requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},1);
     }
     private class Bridge {
+        @JavascriptInterface public void openVideo(String id) {
+            if (id != null && id.matches("[A-Za-z0-9_-]{11}"))
+                runOnUiThread(() -> startActivity(new android.content.Intent(MainActivity.this, VideoActivity.class).putExtra("video", id)));
+        }
         @JavascriptInterface public boolean storeFinish(String scope,String body) {
             return finishDrafts.write(scope,body);
         }
@@ -62,7 +66,7 @@ public class MainActivity extends Activity {
                 try {
                     URI uri = URI.create(origin);
                     if ((!"https".equals(uri.getScheme()) && !(BuildConfig.DEBUG && "http".equals(uri.getScheme()))) || uri.getHost()==null || uri.getUserInfo()!=null || uri.getQuery()!=null || uri.getFragment()!=null || (uri.getPath()!=null && !uri.getPath().isEmpty() && !uri.getPath().equals("/"))) throw new IOException("Endereço do servidor inválido.");
-                    if (!path.matches("/[a-zA-Z0-9/\\-]*") || path.contains("//") || !(method.equals("GET") || method.equals("POST"))) throw new IOException("Requisição inválida.");
+                    if (!path.matches("/[a-zA-Z0-9_/\\-]*") || path.contains("//") || !(method.equals("GET") || method.equals("POST"))) throw new IOException("Requisição inválida.");
                     connection = (HttpURLConnection)new URL(origin.replaceAll("/+$", "")+path).openConnection();
                     connection.setInstanceFollowRedirects(false);
                     connection.setConnectTimeout(10000); connection.setReadTimeout(45000);

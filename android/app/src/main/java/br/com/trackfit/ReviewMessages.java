@@ -21,11 +21,11 @@ public class ReviewMessages extends FirebaseMessagingService {
     static void show(Context context,String event) {
         NotificationManager manager=context.getSystemService(NotificationManager.class);
         if (!manager.areNotificationsEnabled()) return;
-        manager.createNotificationChannel(new NotificationChannel("reviews","Fichas para revisar",NotificationManager.IMPORTANCE_DEFAULT));
+        manager.createNotificationChannel(new NotificationChannel("reviews","Avisos do TrackFit",NotificationManager.IMPORTANCE_DEFAULT));
         Intent intent=new Intent(context,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent open=PendingIntent.getActivity(context,0,intent,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
         Notification note=new Notification.Builder(context,"reviews").setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("TrackFit • revisão disponível").setContentText("Abra o aplicativo para revisar a ficha.")
+            .setContentTitle("TrackFit • novo aviso").setContentText("Abra o aplicativo para consultar seus avisos.")
             .setContentIntent(open).setAutoCancel(true).setOnlyAlertOnce(true).build();
         // Same identifier for a retry and for the foreground inbox.
         manager.notify(event,1,note);
