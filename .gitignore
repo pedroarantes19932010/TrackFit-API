@@ -14,3 +14,13 @@ historico_treinos.json.bak.*.tmp
 *.sqlite-wal
 *.sqlite-shm
 .env
+
+# Piloto Android
+.gradle/
+.idea/
+local.properties
+**/build/
+data/
+*.sqlite3*
+*.jks
+*.keystore
