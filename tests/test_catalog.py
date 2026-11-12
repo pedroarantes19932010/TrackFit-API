@@ -12,7 +12,7 @@ class CatalogTests(unittest.TestCase):
         response = self.client.get("/v1/exercises")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.json()), 8)
-        self.assertEqual(len(self.client.get("/v1/exercises?muscle_group=costas").json()), 1)
+        self.assertEqual(len(self.client.get("/v1/exercises?muscle_group=costas").json()), 2)
         self.assertEqual(self.client.get("/v1/exercises?search=Remada").json()[0]["exercise_id"], "seated_row")
 
     def test_detail_and_unknown(self):
