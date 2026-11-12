@@ -43,12 +43,17 @@ class StudentDemoTests(unittest.TestCase):
         self.assertEqual(response.json()["source"], "ai")
         self.assertEqual(response.json()["version"], 1)
         generator.assert_called_once()
+        queue = self.client.get("/v1/workouts/pending-review", headers=trainer)
+        self.assertEqual(queue.status_code, 200, queue.text)
+        self.assertEqual(len(queue.json()), 1)
+        self.assertEqual(self.client.get("/v1/workouts/pending-review", headers=student).status_code, 403)
         wid = response.json()["workout_id"]
         self.assertEqual(self.client.get(f"/v1/workouts/{wid}", headers=trainer).status_code, 200)
         revision = self.client.post(f"/v1/workouts/{wid}/revisions", headers=trainer, json={
             "expected_version": 1, "exercises": [{"name": "Remada sentada", "sets": 2, "reps": 12, "rest_seconds": 90}]})
         self.assertEqual(revision.status_code, 201, revision.text)
         self.assertEqual(revision.json()["version"], 2)
+        self.assertEqual(self.client.get("/v1/workouts/pending-review", headers=trainer).json(), [])
 
     def test_other_student_cannot_generate_for_someone_else(self):
         with patch("trackfit_api.ai_routes.generate_demo") as generator:
