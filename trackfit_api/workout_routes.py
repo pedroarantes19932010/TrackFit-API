@@ -57,6 +57,24 @@ def create_workout(payload: CreateWorkout, user: dict = Depends(require_trainer)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.get("/pending-review")
+def pending_review(user: dict = Depends(require_trainer)):
+    """Fichas de IA dos alunos vinculados ainda não revisadas pelo professor."""
+    with identity_db() as db:
+        rows = db.execute(
+            """SELECT w.workout_id FROM workout_versions w
+               JOIN trainer_students ts ON ts.student_id=w.student_id
+               WHERE ts.trainer_id=? AND w.status='published' AND w.source='ai'
+                 AND NOT EXISTS (
+                   SELECT 1 FROM workout_versions r
+                   WHERE r.workout_id=w.workout_id AND r.reviewed_by IS NOT NULL
+                 )
+               ORDER BY w.created_at ASC LIMIT 100""",
+            (user["user_id"],),
+        ).fetchall()
+        return [_serialize(get_current(db, row[0])) for row in rows]
+
+
 @router.get("/{workout_id}")
 def read_workout(workout_id: str, user: dict = Depends(current_user)):
     with identity_db() as db:
