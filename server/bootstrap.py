@@ -1,4 +1,5 @@
 """Cria o primeiro treinador localmente. Nunca imprime credenciais preexistentes."""
+from server.accounts import add_code_account
 import argparse
 import secrets
 import time
@@ -13,7 +14,7 @@ def main():
     with app.state.db(True) as db:
         if db.execute("SELECT 1 FROM users WHERE role='trainer'").fetchone():
             raise SystemExit('Treinador já cadastrado. Não recriamos nem exibimos o código existente.')
-        db.execute('INSERT INTO users VALUES(?,?,?,?,?,?)', (user_id,args.name,'trainer',user_id,digest(token),time.time()+30*86400))
+        add_code_account(db, user_id, args.name, 'trainer', user_id, digest(token), time.time()+30*86400)
     print('Código privado do treinador (válido por 30 dias; guarde em local seguro):')
     print(token)
 

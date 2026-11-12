@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 from fastapi.testclient import TestClient
 from server.app import create_app, digest
+from server.accounts import add_code_account
 from server.provider import ProviderError
 
 PROFILE = dict(age=30,goal='condicionamento',experience='iniciante',days=1,minutes=40,equipment='academia',needs_review=False,limitations='',consent=True)
@@ -18,7 +19,7 @@ class ApiTests(unittest.TestCase):
         self.client = TestClient(self.app)
         with self.app.state.db(True) as db:
             for id_,role,owner in [('trainer','trainer','trainer'),('student','student','trainer'),('other','student','trainer'),('foreign','trainer','foreign')]:
-                db.execute('INSERT INTO users VALUES(?,?,?,?,?,?)',(id_,id_,role,owner,digest(id_),time.time()+3600))
+                add_code_account(db, id_, id_, role, owner, digest(id_), time.time()+3600)
         self.t = {'Authorization':'Bearer trainer'}
         self.s = {'Authorization':'Bearer student'}
         self.o = {'Authorization':'Bearer other'}

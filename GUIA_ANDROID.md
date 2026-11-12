@@ -11,7 +11,9 @@ A demonstração roda em memória. Sair ou fechar apaga os exemplos. O servidor 
 
 ## Rodar o piloto conectado
 
-O PR nº 8 contém a API /v1. Este piloto traz um serviço experimental separado em server/ com avaliação, modelos completos, revisões, avisos e sessões realizadas. Ele possui banco e códigos de acesso próprios. A consolidação com as identidades e fichas da API /v1 ainda precisa ser feita antes de atender alunos reais. Use exclusivamente dados fictícios no teste.
+O serviço iniciado abaixo atende o Android, /v1/auth e /v1/workouts usando o mesmo cadastro, vínculo e sessão de acesso. Um aluno cadastrado pelo treinador já pode ser identificado pela API v1. O piloto mantém as fichas de vários dias em /plans e os treinos simples da API anterior em /v1/workouts. Esses formatos ainda têm históricos separados.
+
+O serviço usa TRACKFIT_DB_PATH ou TRACKFIT_DB. Se ambas estiverem configuradas, devem apontar para o mesmo arquivo. Um banco antigo do piloto é convertido em uma transação na inicialização. Códigos, vencimentos e sessões de treino são preservados. Antes de atualizar uma instalação, pare os processos e faça backup do banco. Se já existirem dois arquivos distintos com dados, mantenha ambos: a atualização não combina contas de arquivos separados. No piloto Android o aluno precisa ter um único treinador responsável. Use dados fictícios nos testes.
 
 No PowerShell, a partir da raiz desta branch:
 

@@ -1,5 +1,6 @@
 """Identidade local: senhas scrypt, tokens aleatórios e vínculo professor-aluno."""
 import hashlib
+from contextvars import ContextVar
 import hmac
 import secrets
 import sqlite3
@@ -11,14 +12,21 @@ from fastapi import Depends, Header, HTTPException
 from trackfit_api.storage import connect
 
 SESSION_HOURS = 12
+request_database = ContextVar("trackfit_request_database", default=None)
 
 
 def identity_db():
     import os
-    path = os.environ.get("TRACKFIT_DB_PATH")
+    path = request_database.get() or os.environ.get("TRACKFIT_DB_PATH")
     if not path:
         raise HTTPException(status_code=503, detail="Banco não configurado")
     db = connect(Path(path))
+    ensure_identity_tables(db)
+    db.commit()
+    return db
+
+
+def ensure_identity_tables(db):
     db.execute("""CREATE TABLE IF NOT EXISTS users (
         user_id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE,
         role TEXT NOT NULL CHECK(role IN ('trainer','student')),
@@ -31,8 +39,6 @@ def identity_db():
     db.execute("""CREATE TABLE IF NOT EXISTS sessions (
         token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL,
         expires_at TEXT NOT NULL, FOREIGN KEY(user_id) REFERENCES users(user_id))""")
-    db.commit()
-    return db
 
 
 def hash_password(password: str) -> str:

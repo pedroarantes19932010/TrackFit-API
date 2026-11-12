@@ -9,7 +9,11 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
+from trackfit_api.identity import current_user, request_database
+from trackfit_api.auth_routes import router as auth_router
+from trackfit_api.workout_routes import router as workout_router
+from server.accounts import add_code_account, prepare_accounts
 from server.models import (Generate, Review, Template, TemplateApproval, NewStudent, Start, Finish)
 from server.provider import choose_template, ProviderError
 
@@ -27,18 +31,20 @@ def digest(token):
 
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,name TEXT NOT NULL,role TEXT NOT NULL,trainer TEXT NOT NULL,token_hash TEXT UNIQUE NOT NULL,expires REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS templates(id TEXT PRIMARY KEY,trainer TEXT NOT NULL,data TEXT NOT NULL,approved INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS plans(id TEXT PRIMARY KEY,student TEXT NOT NULL,trainer TEXT NOT NULL,request_id TEXT NOT NULL,request_hash TEXT NOT NULL,profile TEXT NOT NULL,version INTEGER NOT NULL,state TEXT NOT NULL,source TEXT NOT NULL,template_id TEXT,created REAL NOT NULL,UNIQUE(student,request_id));
 CREATE TABLE IF NOT EXISTS versions(plan TEXT NOT NULL,version INTEGER NOT NULL,data TEXT NOT NULL,note TEXT NOT NULL,created REAL NOT NULL,PRIMARY KEY(plan,version));
 CREATE TABLE IF NOT EXISTS notifications(id TEXT PRIMARY KEY,trainer TEXT NOT NULL,plan TEXT NOT NULL,message TEXT NOT NULL,created REAL NOT NULL,seen INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,student TEXT NOT NULL,plan TEXT NOT NULL,version INTEGER NOT NULL,day INTEGER NOT NULL,snapshot TEXT NOT NULL,state TEXT NOT NULL,actual TEXT,request_id TEXT NOT NULL,created REAL NOT NULL,UNIQUE(student,request_id));
+CREATE TABLE IF NOT EXISTS training_sessions(id TEXT PRIMARY KEY,student TEXT NOT NULL,plan TEXT NOT NULL,version INTEGER NOT NULL,day INTEGER NOT NULL,snapshot TEXT NOT NULL,state TEXT NOT NULL,actual TEXT,request_id TEXT NOT NULL,created REAL NOT NULL,UNIQUE(student,request_id));
 CREATE TABLE IF NOT EXISTS rate_events(student TEXT NOT NULL,created REAL NOT NULL);
 """
 
 
 def create_app(db_path=None, mode=None, chooser=None):
-    path = Path(db_path or os.getenv("TRACKFIT_DB", "data/trackfit.sqlite3"))
+    pilot_path, api_path = os.getenv("TRACKFIT_DB"), os.getenv("TRACKFIT_DB_PATH")
+    if not db_path and pilot_path and api_path and Path(pilot_path).resolve() != Path(api_path).resolve():
+        raise ValueError("Há dois bancos configurados. Escolha explicitamente um banco para o serviço integrado.")
+    path = Path(db_path or api_path or pilot_path or "data/trackfit.sqlite3").resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     provider_mode = mode or os.getenv("TRACKFIT_PROVIDER", "demo")
     selector = chooser or choose_template
@@ -59,19 +65,39 @@ def create_app(db_path=None, mode=None, chooser=None):
         finally:
             conn.close()
 
-    with db() as conn:
-        conn.executescript(SCHEMA)
+    with db(True) as conn:
+        prepare_accounts(conn)
+        for statement in SCHEMA.split(";"):
+            if statement.strip():
+                conn.execute(statement)
     app = FastAPI(title="TrackFit — piloto", version="0.1.0")
     app.state.db = db
 
-    def auth(authorization: str = Header(default="")):
-        if not authorization.startswith("Bearer ") or len(authorization) > 200:
-            raise HTTPException(401, "Informe seu código de acesso.")
+    app.include_router(auth_router)
+    app.include_router(workout_router)
+
+    @app.middleware("http")
+    async def bind_database(request, call_next):
+        binding = request_database.set(path)
+        try:
+            return await call_next(request)
+        finally:
+            request_database.reset(binding)
+
+    def auth(identity=Depends(current_user)):
+        user_id, role = identity["user_id"], identity["role"]
         with db() as conn:
-            user = conn.execute("SELECT * FROM users WHERE token_hash=? AND expires>?", (digest(authorization[7:]), time.time())).fetchone()
-        if user is None:
-            raise HTTPException(401, "Acesso inválido ou expirado.")
-        return dict(user)
+            name = conn.execute(
+                "SELECT COALESCE(n.name,u.username) FROM users u LEFT JOIN mobile_names n USING(user_id) WHERE u.user_id=?",
+                (user_id,),
+            ).fetchone()[0]
+            trainer_id = user_id
+            if role == "student":
+                links = conn.execute("SELECT trainer_id FROM trainer_students WHERE student_id=?", (user_id,)).fetchall()
+                if len(links) != 1:
+                    raise HTTPException(409, "Para usar o piloto, o aluno precisa de um treinador responsável definido.")
+                trainer_id = links[0][0]
+        return {"id": user_id, "role": role, "name": name, "trainer": trainer_id}
 
     def trainer(user=Depends(auth)):
         if user["role"] != "trainer":
@@ -96,7 +122,7 @@ def create_app(db_path=None, mode=None, chooser=None):
         out["days"] = data if user["role"] == "trainer" or plan["state"] in ("released", "reviewed") else []
         out["profile"] = json.loads(plan["profile"])
         out["note"] = version["note"]
-        out["student_name"] = conn.execute("SELECT name FROM users WHERE id=?", (plan["student"],)).fetchone()[0]
+        out["student_name"] = conn.execute("SELECT COALESCE(n.name,u.username) FROM users u LEFT JOIN mobile_names n USING(user_id) WHERE u.user_id=?", (plan["student"],)).fetchone()[0]
         out.pop("request_hash", None)
         return out
 
@@ -115,7 +141,7 @@ def create_app(db_path=None, mode=None, chooser=None):
     def add_student(body: NewStudent, user=Depends(trainer)):
         token, student_id = secrets.token_urlsafe(32), uid()
         with db(True) as conn:
-            conn.execute("INSERT INTO users VALUES(?,?,?,?,?,?)", (student_id, body.name, "student", user["id"], digest(token), time.time() + 30 * 86400))
+            add_code_account(conn, student_id, body.name, "student", user["id"], digest(token), time.time() + 30 * 86400)
         return {"id": student_id, "name": body.name, "access_code": token, "expires_in_days": 30}
 
     @app.get("/templates")
@@ -223,7 +249,7 @@ def create_app(db_path=None, mode=None, chooser=None):
             conn.execute("UPDATE plans SET version=?,state=? WHERE id=?", (version,state,plan_id))
             # Safety suspension immediately stops active sessions; normal edits do not alter snapshots.
             if state == "suspended":
-                conn.execute("UPDATE sessions SET state='suspended' WHERE plan=? AND state='active'", (plan_id,))
+                conn.execute("UPDATE training_sessions SET state='suspended' WHERE plan=? AND state='active'", (plan_id,))
             return show_plan(conn, get_plan(conn, plan_id, user), user)
 
     @app.get("/notifications")
@@ -247,13 +273,13 @@ def create_app(db_path=None, mode=None, chooser=None):
     @app.get("/sessions")
     def sessions(user=Depends(student)):
         with db() as conn:
-            return [show_session(r) for r in conn.execute("SELECT * FROM sessions WHERE student=? ORDER BY created DESC LIMIT 100", (user["id"],))]
+            return [show_session(r) for r in conn.execute("SELECT * FROM training_sessions WHERE student=? ORDER BY created DESC LIMIT 100", (user["id"],))]
 
     @app.post("/plans/{plan_id}/sessions", status_code=201)
     def start_session(plan_id: str, body: Start, user=Depends(student)):
         with db(True) as conn:
             plan = get_plan(conn, plan_id, user)
-            old = conn.execute("SELECT * FROM sessions WHERE student=? AND request_id=?", (user["id"],body.request_id)).fetchone()
+            old = conn.execute("SELECT * FROM training_sessions WHERE student=? AND request_id=?", (user["id"],body.request_id)).fetchone()
             if old:
                 if old["plan"] != plan_id or old["version"] != body.expected_version or old["day"] != body.day:
                     raise HTTPException(409, "Solicitação conflitante.")
@@ -262,19 +288,19 @@ def create_app(db_path=None, mode=None, chooser=None):
                 raise HTTPException(409, "Ficha ainda não liberada ou suspensa.")
             if plan["version"] != body.expected_version:
                 raise HTTPException(409, "Existe uma nova versão. Atualize a ficha.")
-            if conn.execute("SELECT id FROM sessions WHERE student=? AND state='active'", (user["id"],)).fetchone():
+            if conn.execute("SELECT id FROM training_sessions WHERE student=? AND state='active'", (user["id"],)).fetchone():
                 raise HTTPException(409, "Você já tem um treino em andamento. Abra o histórico.")
             days = json.loads(conn.execute("SELECT data FROM versions WHERE plan=? AND version=?", (plan_id,plan["version"])).fetchone()[0])
             if body.day >= len(days):
                 raise HTTPException(422, "Dia inválido.")
             session_id = uid()
-            conn.execute("INSERT INTO sessions VALUES(?,?,?,?,?,?,?,?,?,?)", (session_id,user["id"],plan_id,plan["version"],body.day,packed(days[body.day]),"active",None,body.request_id,time.time()))
-            return show_session(conn.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone())
+            conn.execute("INSERT INTO training_sessions VALUES(?,?,?,?,?,?,?,?,?,?)", (session_id,user["id"],plan_id,plan["version"],body.day,packed(days[body.day]),"active",None,body.request_id,time.time()))
+            return show_session(conn.execute("SELECT * FROM training_sessions WHERE id=?", (session_id,)).fetchone())
 
     @app.post("/sessions/{session_id}/finish")
     def finish(session_id: str, body: Finish, user=Depends(student)):
         with db(True) as conn:
-            row = conn.execute("SELECT * FROM sessions WHERE id=? AND student=?", (session_id,user["id"])).fetchone()
+            row = conn.execute("SELECT * FROM training_sessions WHERE id=? AND student=?", (session_id,user["id"])).fetchone()
             if not row:
                 raise HTTPException(404, "Treino não encontrado.")
             actual = packed(body.model_dump())
@@ -289,7 +315,7 @@ def create_app(db_path=None, mode=None, chooser=None):
                 if pair in seen or s.exercise_index >= len(exercises) or s.set_index >= exercises[s.exercise_index]["sets"]:
                     raise HTTPException(422, "Série inválida ou repetida.")
                 seen.add(pair)
-            conn.execute("UPDATE sessions SET state='finished',actual=? WHERE id=?", (actual,session_id))
-            return show_session(conn.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone())
+            conn.execute("UPDATE training_sessions SET state='finished',actual=? WHERE id=?", (actual,session_id))
+            return show_session(conn.execute("SELECT * FROM training_sessions WHERE id=?", (session_id,)).fetchone())
 
     return app
