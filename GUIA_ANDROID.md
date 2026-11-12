@@ -1,6 +1,6 @@
 # Testar o TrackFit no Android
 
-O APK de teste está em [downloads/TrackFit-Piloto.apk](downloads/TrackFit-Piloto.apk). Use Android 8 ou superior com WebView atualizado. O arquivo também funciona offline. No computador, baixe [TrackFit-Demo.html](downloads/TrackFit-Demo.html) e abra no navegador.
+Abra o [PR do piloto](https://github.com/pedroarantes19932010/TrackFit-API/pull/9/checks), selecione a última execução bem-sucedida de **Android piloto** e baixe **TrackFit-Android-debug** na seção **Artifacts**. Extraia o APK do ZIP. O arquivo APK na pasta downloads é de uma versão anterior. Use Android 8 ou superior com WebView atualizado. O arquivo também funciona offline. No computador, baixe [TrackFit-Demo.html](downloads/TrackFit-Demo.html) e abra no navegador.
 
 1. Abra **Conhecer a demonstração**. A página inicial mostra as fichas que Pedro pode revisar.
 2. Toque em **Ver como aluno**, depois em **Preencher avaliação**. Para o exemplo fictício, use 30 anos, condicionamento, iniciante, academia, 1 dia e 40 minutos. Responda “Não” à pergunta sobre limitações e marque a autorização para o exemplo.
@@ -42,4 +42,6 @@ O [rascunho da primeira ficha](RASCUNHO_FICHA.md) fica disponível para revisão
 
 Ao criar ou editar um modelo, adicione um exercício e selecione a referência do catálogo. Você também pode manter um exercício personalizado. O vínculo acompanha a ficha gerada e a sessão gravada. No detalhe da ficha, **Consultar catálogo** mostra as orientações cadastradas. Os seis itens iniciais vêm do catálogo do PR nº 11; nenhum vídeo foi selecionado por padrão.
 
-O aluno abre **Conversa sobre esta ficha** e envia a dúvida. Em **Conversas sobre fichas**, o treinador vê quem escreveu por último, abre a conversa, responde e pode voltar para editar a ficha. Cada mensagem guarda a versão existente no momento do envio. Para ver mensagens novas, abra a conversa novamente. As notificações de ficha completa continuam separadas do suporte.
+O aluno abre **Conversa sobre esta ficha** e envia a dúvida. Em **Conversas sobre fichas**, o treinador vê quem escreveu por último, abre a conversa, responde e pode voltar para editar a ficha. Cada mensagem guarda a versão existente no momento do envio. Em **Avisos**, aluno e treinador podem abrir diretamente a conversa que recebeu uma mensagem. Abrir a conversa marca seus avisos como lidos. Para receber avisos com o aplicativo fechado, use uma compilação vinculada ao Firebase e ative essa opção no aparelho.
+
+No piloto conectado, abra **Vídeos**, escolha o exercício, cole o link do YouTube e informe o canal e a categoria. Após salvar, o aluno encontra o vídeo em **Consultar catálogo** na ficha ou durante o treino. Se a incorporação estiver indisponível, o player oferece **Abrir no YouTube**. O treinador pode atualizar um vídeo salvando o mesmo link ou removê-lo do exercício.
