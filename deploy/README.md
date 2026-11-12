@@ -12,3 +12,7 @@ O APK offline serve para conhecer as telas. Para que dois aparelhos compartilhem
 8. Para testar o backup, rode `docker compose exec api python -m server.backup /data/trackfit.sqlite3 /data/copia-teste.sqlite3` e `docker compose cp api:/data/copia-teste.sqlite3 ./secrets/copia-teste.sqlite3`. Guarde uma cópia protegida fora do servidor. Para conferir a restauração, abra a cópia em outra instância com TRACKFIT_DB apontando para ela e faça login com um código de teste ainda válido.
 
 O servidor conserva o aviso na caixa do treinador se o envio falhar. A fila usa tentativas com intervalo crescente e expira após 24 horas. O vínculo do aparelho expira junto com o acesso. Se o aparelho for reinstalado ou trocar de acesso, ative os avisos novamente. A assinatura do APK de demonstração é de teste. Use assinatura privativa estável para distribuição e atualizações de produção.
+
+## Recuperar o acesso do treinador
+
+Se o código do treinador do piloto vencer ou for perdido, o administrador do servidor pode executar `docker compose exec api python -m server.bootstrap --renew` na pasta deploy. O comando mostra um novo código válido por 30 dias no terminal privado. Entre com ele e reative os avisos em **Avisos**. Os códigos anteriores do treinador perdem a validade. Os alunos mantêm seus códigos, vínculos e treinos. A operação se aplica à instalação com um único treinador do piloto autenticado por código.
