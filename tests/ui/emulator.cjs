@@ -1,6 +1,7 @@
 // Drive the installed debug APK's own WebView through adb's local CDP tunnel.
 const { _android: android } = require('playwright');
 const assert = require('node:assert/strict');
+const {execFileSync} = require('node:child_process');
 async function run(page) {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -78,10 +79,49 @@ async function connected(page) {
   await page.locator('#consent').check();
   await page.locator('#generate').click();
   await page.locator('#start').click();
+  // Server disappears mid-session; a new instance resumes from a verified backup.
+  execFileSync('bash',['tests/ui/restore-server.sh'],{stdio:'inherit'});
+  await page.locator('#historyNav').click();
+  await page.locator('#sessions button').click();
   await page.locator('.weight').fill('12,5');
   await page.locator('.reps').fill('10');
+  execFileSync('docker',['stop','trackfit-emulator-restored']);
+  try {
+    await page.locator('#finish').click();
+    await page.getByText(/Gravação ainda não confirmada/).waitFor();
+  } finally {
+    execFileSync('docker',['start','trackfit-emulator-restored']);
+    for(let attempt=0;attempt<40;attempt++){
+      try{if((await fetch(base+'/health')).ok)break;}catch{}
+      await new Promise(resolve=>setTimeout(resolve,250));
+    }
+  }
+  await page.reload();
+  await page.locator('#server').fill(base);
+  await page.locator('#code').fill(student.access_code);
+  await page.locator('#enter').click();
+  await page.locator('#historyNav').click();
+  await page.locator('#sessions button').click();
+  await page.getByText(/Os dados desta tentativa foram recuperados/).waitFor();
+  assert.equal(await page.locator('.weight').inputValue(),'12.5');
+  // Drop only the finish acknowledgement after the real server committed it.
+  await page.evaluate(()=>{
+    const original=window.receiveNative;
+    window.receiveNative=(id,response)=>{
+      if(response.body?.state==='finished'){
+        window.receiveNative=original;
+        return original(id,{status:0,body:{detail:'Resposta interrompida pelo teste.'}});
+      }
+      return original(id,response);
+    };
+  });
+  await page.locator('#finish').click();
+  await page.getByText(/Gravação ainda não confirmada/).waitFor();
   await page.locator('#finish').click();
   await page.locator('#sessions button').waitFor();
+  const records=await (await fetch(base+'/sessions',{headers:{Authorization:'Bearer '+student.access_code}})).json();
+  assert.equal(records.length,1);
+  assert.deepEqual(records[0].actual.sets,[{exercise_index:0,set_index:0,weight_kg:12.5,reps:10}]);
   await login(trainer);
   await page.locator('#timeline').click();
   for (const title of ['Ficha da API anterior','Ficha do Android','Treino registrado'])

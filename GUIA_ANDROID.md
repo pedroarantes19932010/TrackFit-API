@@ -31,3 +31,9 @@ Por padrão o servidor seleciona modelos por regras. Para experimentar a integra
 ## Verificação
 
 Execute python -m unittest discover -s tests -v na raiz após instalar as dependências. O APK foi compilado com SDK 35, assinado com chave de teste e verificado com apksigner. Para hospedagem, backup, ativação da IA e notificações em aparelhos reais, consulte [o guia do piloto conectado](deploy/README.md). A entrega real pelo Firebase, o teste físico, o servidor público e a publicação na Play Store dependem de configuração externa.
+
+## Quando o sinal cai ao salvar
+
+Ao tocar em **Salvar treino realizado**, o Android conectado guarda uma tentativa criptografada no aparelho. Enquanto faltar a confirmação do servidor, os dados dessa tentativa ficam disponíveis para reenvio. Depois de reabrir o app, entre com a mesma conta no mesmo servidor e consulte **Histórico**. Se a sessão estiver em andamento, abra-a para confirmar o envio. Se estiver concluída, abra o registro salvo. Esta proteção começa ao tocar em salvar.
+
+O [rascunho da primeira ficha](RASCUNHO_FICHA.md) fica disponível para revisão do treinador.

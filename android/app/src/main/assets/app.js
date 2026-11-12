@@ -113,10 +113,54 @@ window.receivePush=async(binding,deviceToken,error)=>{
 };
 async function notifications(){const rows=await api('GET','/notifications');page('<span class="eyebrow">ACOMPANHAMENTO</span><h1>Seus avisos.</h1><p class="muted">As fichas chegam completas para revisão.</p><div id="pushAction"></div><div id="alerts"></div>');if(!demo){$('#pushAction').innerHTML='<button id="push">Ativar avisos com o app fechado</button>';button('push',enablePush);}for(const n of rows){const el=document.createElement('div');el.className='card';el.innerHTML='<span class="badge">'+(n.seen?'Lido':'Novo')+'</span><p>'+esc(n.message)+'</p><button>Ver ficha</button>';el.querySelector('button').onclick=async()=>{try{await api('POST',`/notifications/${n.id}/read`);await detail(n.plan);}catch(e){toast(e.message);}};$('#alerts').append(el);}if(!rows.length)$('#alerts').innerHTML='<p class="empty">Nenhum aviso por enquanto.</p>';}
 async function history(){const rows=await api('GET','/sessions');page('<span class="eyebrow">SEU REGISTRO</span><h1>Histórico de treinos.</h1><div id="sessions"></div>');for(const s of rows){const el=document.createElement('div');el.className='card';el.innerHTML='<span class="badge">'+esc({active:'Em andamento',finished:'Concluído',suspended:'Suspenso'}[s.state])+'</span><h2>'+esc(s.snapshot.title)+'</h2><p>Ficha versão '+s.version+'</p><button>Abrir registro</button>';el.querySelector('button').onclick=()=>sessionView(s);$('#sessions').append(el);}if(!rows.length)$('#sessions').innerHTML='<p class="empty">Os treinos iniciados aparecerão aqui.</p>';}
+function finishPayload() {
+ const sets=[];
+ for(const row of document.querySelectorAll('.set-row')){
+   const weight=row.querySelector('.weight').value.trim(), reps=row.querySelector('.reps').value.trim();
+   if(!weight&&!reps)continue;
+   const kg=Number(weight.replace(',','.')), count=Number(reps);
+   if(!weight||!reps||!Number.isFinite(kg)||kg<0||kg>1000||!Number.isInteger(count)||count<0||count>100)
+     throw Error('Confira a carga (0–1000 kg) e as repetições (0–100) de cada série.');
+   sets.push({exercise_index:Number(row.dataset.exercise),set_index:Number(row.dataset.set),weight_kg:kg,reps:count});
+ }
+ if(!sets.length)throw Error('Registre ao menos uma série realizada.');
+ return {sets,note:$('#note').value};
+}
 function sessionView(s){
- page('<span class="eyebrow">TREINO • VERSÃO '+s.version+'</span><h1>'+esc(s.snapshot.title)+'</h1><div class="notice">Registre somente o que realizou. A carga não é sugerida automaticamente. Zero significa ausência de carga externa. Campos vazios não são registrados.</div><div id="sets"></div>'+ (s.state==='active'?'<label for="note">Observações</label><textarea id="note"></textarea><button id="finish">Salvar treino realizado</button>':'<p>Este registro está '+esc(s.state==='finished'?'concluído':'suspenso')+'.</p>'));
- for(let i=0;i<s.snapshot.exercises.length;i++){const e=s.snapshot.exercises[i];const box=document.createElement('div');box.className='card';box.innerHTML='<h2>'+esc(e.name)+'</h2><p>'+esc(e.instructions)+'</p><small>Referência: '+e.sets+' × '+e.reps+' • '+e.rest_seconds+'s de descanso</small>';for(let j=0;j<e.sets;j++){const actual=s.actual?.sets.find(x=>x.exercise_index===i&&x.set_index===j);const row=document.createElement('div');row.className='row set-row';row.dataset.exercise=i;row.dataset.set=j;row.innerHTML='<div><label>Série '+(j+1)+' • kg</label><input class="weight" inputmode="decimal" value="'+(actual?.weight_kg??'')+'" '+(s.state!=='active'?'disabled':'')+'></div><div><label>Repetições realizadas</label><input class="reps" type="number" value="'+(actual?.reps??'')+'" '+(s.state!=='active'?'disabled':'')+'></div>';box.append(row);}$('#sets').append(box);}
- button('finish',async()=>{const sets=[];for(const row of document.querySelectorAll('.set-row')){const w=row.querySelector('.weight').value.trim(),r=row.querySelector('.reps').value.trim();if(!w&&!r)continue;if(!w||!r)throw Error('Preencha carga e repetições para cada série realizada.');sets.push({exercise_index:Number(row.dataset.exercise),set_index:Number(row.dataset.set),weight_kg:Number(w.replace(',','.')),reps:Number(r)});}if(!sets.length)throw Error('Registre ao menos uma série realizada.');await api('POST',`/sessions/${s.id}/finish`,{sets,note:$('#note').value});await history();});
+ const native=demo?null:window.TrackFitNative;
+ const scope=JSON.stringify([origin,me.id,s.id]);
+ const viewUser=me;
+ let pending=null, unreadable=false;
+ if(s.state==='active'){
+   const saved=native?.loadFinish?.(scope);
+   if(saved){try{pending=JSON.parse(saved);}catch{unreadable=true;}}
+ }else{native?.storeFinish?.(scope,'');}
+
+ page('<span class="eyebrow">TREINO • VERSÃO '+s.version+'</span><h1>'+esc(s.snapshot.title)+'</h1><div class="notice">Registre somente o que realizou. A carga não é sugerida automaticamente. Zero significa ausência de carga externa. Campos vazios não são registrados.</div><div id="sets"></div>'+ (s.state==='active'?'<label for="note">Observações</label><textarea id="note" maxlength="1000"></textarea><p id="saveState" role="status"></p><button id="finish">Salvar treino realizado</button>':'<p>Este registro está '+esc(s.state==='finished'?'concluído':'suspenso')+'.</p>'));
+ for(let i=0;i<s.snapshot.exercises.length;i++){const e=s.snapshot.exercises[i];const box=document.createElement('div');box.className='card';box.innerHTML='<h2>'+esc(e.name)+'</h2><p>'+esc(e.instructions)+'</p><small>Referência: '+e.sets+' × '+e.reps+' • '+e.rest_seconds+'s de descanso</small>';for(let j=0;j<e.sets;j++){const actual=(s.actual||pending)?.sets.find(x=>x.exercise_index===i&&x.set_index===j);const row=document.createElement('div');row.className='row set-row';row.dataset.exercise=i;row.dataset.set=j;row.innerHTML='<div><label>Série '+(j+1)+' • kg</label><input class="weight" inputmode="decimal" value="'+(actual?.weight_kg??'')+'" '+(s.state!=='active'?'disabled':'')+'></div><div><label>Repetições realizadas</label><input class="reps" type="number" value="'+(actual?.reps??'')+'" '+(s.state!=='active'?'disabled':'')+'></div>';box.append(row);}$('#sets').append(box);}
+ if(s.state!=='active')return;
+ const finishButton=$('#finish'), status=$('#saveState');
+ function retryState(message){
+   status.textContent=message;
+   finishButton.textContent='Tentar confirmar novamente';
+   document.querySelectorAll('.set-row input,#note').forEach(input=>input.disabled=true);
+ }
+ if(unreadable){status.textContent='O rascunho não pôde ser lido. Confira o histórico do servidor antes de preencher novamente.';}
+ if(pending){$('#note').value=pending.note;retryState('Envio pendente. Os dados desta tentativa foram recuperados.');}
+ button('finish',async()=>{
+   if(!pending){
+     const body=finishPayload();
+     if(native?.storeFinish&&!native.storeFinish(scope,JSON.stringify(body)))throw Error('Não foi possível guardar a tentativa neste aparelho. Os campos continuam disponíveis.');
+     pending=body;
+   }
+   retryState('Aguardando confirmação do servidor…');
+   let result;
+   try{result=await api('POST','/sessions/'+s.id+'/finish',pending);}
+   catch(error){status.textContent='Gravação ainda não confirmada. Reconecte e tente novamente com os mesmos dados. Se o treino foi suspenso, consulte o histórico.';throw error;}
+   native?.storeFinish?.(scope,'');
+   if(me!==viewUser||!finishButton.isConnected)return;
+   try{await history();}catch{sessionView(result);toast('Treino salvo. O histórico completo poderá ser atualizado depois.');}
+ });
 }
 // Isolated offline walkthrough: never calls the server; all contents are fictional.
 let demoPlans=[],demoTemplates=[],demoSessions=[],demoAlerts=[];

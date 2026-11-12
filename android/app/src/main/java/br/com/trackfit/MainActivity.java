@@ -13,9 +13,11 @@ import org.json.*;
 /** Local-only interface. Remote sites never run inside this privileged WebView. */
 public class MainActivity extends Activity {
     private WebView web;
+    private FinishDrafts finishDrafts;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        finishDrafts = new FinishDrafts(this);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE);
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
         web = new WebView(this);
@@ -47,6 +49,12 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= 33) requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},1);
     }
     private class Bridge {
+        @JavascriptInterface public boolean storeFinish(String scope,String body) {
+            return finishDrafts.write(scope,body);
+        }
+        @JavascriptInterface public String loadFinish(String scope) {
+            return finishDrafts.read(scope);
+        }
         @JavascriptInterface public void request(String id, String origin, String token, String method, String path, String body) {
             executor.execute(() -> {
                 JSONObject response = new JSONObject();
