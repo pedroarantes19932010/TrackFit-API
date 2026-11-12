@@ -106,6 +106,17 @@ async function connected(page) {
   await page.locator('#historyNav').click();
   await page.locator('#sessions button').click();
   await page.locator('.weight').fill('12,5');
+  await page.locator('#note').fill('Parcial do teste');
+  await page.reload();
+  await page.locator('#server').fill(base);
+  await page.locator('#code').fill(student.access_code);
+  await page.locator('#enter').click();
+  await page.locator('#historyNav').click();
+  await page.locator('#sessions button').click();
+  await page.getByText(/Rascunho recuperado neste aparelho/).waitFor();
+  assert.equal(await page.locator('.weight').inputValue(),'12,5');
+  assert.equal(await page.locator('.reps').inputValue(),'');
+  assert.equal(await page.locator('#note').inputValue(),'Parcial do teste');
   await page.locator('.reps').fill('10');
   execFileSync('docker',['stop','trackfit-emulator-restored']);
   try {

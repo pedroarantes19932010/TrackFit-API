@@ -2,21 +2,23 @@
 import argparse
 import os
 import sqlite3
+import tempfile
 from pathlib import Path
 from contextlib import closing
 
 def backup(source, destination):
     source, destination = Path(source).resolve(), Path(destination).resolve()
-    descriptor = os.open(destination, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    os.close(descriptor)
-    try:
-        with closing(sqlite3.connect(source.as_uri()+"?mode=ro",uri=True)) as old, closing(sqlite3.connect(destination)) as new:
+    if destination.exists():
+        raise FileExistsError(destination)
+    # Keep unfinished snapshots out of the path used by restore jobs.
+    with tempfile.TemporaryDirectory(prefix=".trackfit-backup-", dir=destination.parent) as folder:
+        snapshot = Path(folder) / "snapshot.sqlite3"
+        with closing(sqlite3.connect(source.as_uri()+"?mode=ro",uri=True)) as old, closing(sqlite3.connect(snapshot)) as new:
             old.backup(new)
             if new.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise ValueError("Cópia inválida.")
-    except BaseException:
-        destination.unlink(missing_ok=True)
-        raise
+        snapshot.chmod(0o600)
+        os.link(snapshot, destination)  # Atomic, including when another backup finishes first.
 
 if __name__=="__main__":
     parser=argparse.ArgumentParser()
