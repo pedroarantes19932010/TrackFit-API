@@ -7,6 +7,8 @@ from trackfit_api.auth_routes import router as auth_router
 from trackfit_api.ai_routes import router as ai_router
 
 app = FastAPI(title="TrackFit API", version="0.2.0", description="Protótipo local do TrackFit")
+from trackfit_api.catalog_routes import router as catalog_router
+app.include_router(catalog_router)
 app.include_router(workout_router)
 app.include_router(auth_router)
 app.include_router(ai_router)

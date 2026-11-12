@@ -37,3 +37,9 @@ Execute python -m unittest discover -s tests -v na raiz após instalar as depend
 Ao tocar em **Salvar treino realizado**, o Android conectado guarda uma tentativa criptografada no aparelho. Enquanto faltar a confirmação do servidor, os dados dessa tentativa ficam disponíveis para reenvio. Depois de reabrir o app, entre com a mesma conta no mesmo servidor e consulte **Histórico**. Se a sessão estiver em andamento, abra-a para confirmar o envio. Se estiver concluída, abra o registro salvo. Esta proteção começa ao tocar em salvar.
 
 O [rascunho da primeira ficha](RASCUNHO_FICHA.md) fica disponível para revisão do treinador.
+
+## Catálogo e suporte no piloto conectado
+
+Ao criar ou editar um modelo, adicione um exercício e selecione a referência do catálogo. Você também pode manter um exercício personalizado. O vínculo acompanha a ficha gerada e a sessão gravada. No detalhe da ficha, **Consultar catálogo** mostra as orientações cadastradas. Os seis itens iniciais vêm do catálogo do PR nº 11; nenhum vídeo foi selecionado por padrão.
+
+O aluno abre **Conversa sobre esta ficha** e envia a dúvida. Em **Conversas sobre fichas**, o treinador vê quem escreveu por último, abre a conversa, responde e pode voltar para editar a ficha. Cada mensagem guarda a versão existente no momento do envio. Para ver mensagens novas, abra a conversa novamente. As notificações de ficha completa continuam separadas do suporte.

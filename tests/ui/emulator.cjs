@@ -64,7 +64,7 @@ async function connected(page) {
   const exercise = {name:'Exercício teste',sets:1,reps:10,rest_seconds:60};
   await post('/v1/workouts',{student_id:student.id,exercises:[exercise]});
   const template = await post('/templates',{name:'Exemplo',goal:'condicionamento',experience:'iniciante',equipment:'academia',
-    minutes:30,min_age:18,max_age:60,days:[{title:'Dia fictício',exercises:[{...exercise,instructions:'Teste de software.'}]}]});
+    minutes:30,min_age:18,max_age:60,days:[{title:'Dia fictício',exercises:[{...exercise,exercise_id:'seated_row',name:'Remada sentada',instructions:'Teste de software.'}]}]});
   await post('/templates/'+template.id+'/approval',{approved:true});
   async function login(code) {
     await page.locator('#logout').click();
@@ -78,6 +78,12 @@ async function connected(page) {
   await page.locator('#review').selectOption('no');
   await page.locator('#consent').check();
   await page.locator('#generate').click();
+  await page.getByText('Consultar catálogo',{exact:true}).click();
+  await page.locator('#openSupport').click();
+  await page.locator('#question').fill('Dúvida fictícia sobre o aparelho');
+  await page.locator('#sendMessage').click();
+  await page.locator('#messages').getByText('Dúvida fictícia sobre o aparelho').waitFor();
+  await page.locator('#backPlan').click();
   await page.locator('#start').click();
   // Server disappears mid-session; a new instance resumes from a verified backup.
   execFileSync('bash',['tests/ui/restore-server.sh'],{stdio:'inherit'});
@@ -123,6 +129,12 @@ async function connected(page) {
   assert.equal(records.length,1);
   assert.deepEqual(records[0].actual.sets,[{exercise_index:0,set_index:0,weight_kg:12.5,reps:10}]);
   await login(trainer);
+  await page.locator('#inbox').click();
+  await page.locator('#threads button').first().click();
+  await page.locator('#question').fill('Resposta do treinador para teste');
+  await page.locator('#sendMessage').click();
+  await page.locator('#messages').getByText('Resposta do treinador para teste').waitFor();
+  await page.locator('#homeNav').click();
   await page.locator('#timeline').click();
   for (const title of ['Ficha da API anterior','Ficha do Android','Treino registrado'])
     await page.locator('#records summary').filter({hasText:title}).waitFor();

@@ -3,6 +3,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const app=$('#app'); let token='',origin='',me=null,demo=false,poller=null,requestCount=0;
 const awaiting=new Map(), announced=new Set();
+let catalog=[];
 let generation=null, pushBinding=null;
 const labels={pending:'Aguardando avaliação',released:'Revisão pendente',reviewed:'Revisada pelo treinador',suspended:'Suspensa'};
 const uuid=()=>typeof crypto.randomUUID==='function' ? crypto.randomUUID() : Array.from(crypto.getRandomValues(new Uint8Array(16)), b=>b.toString(16).padStart(2,'0')).join('');
@@ -25,8 +26,8 @@ function login(){
  if(me && !demo) window.TrackFitNative?.bindPush?.('');
  pushBinding=null;clearInterval(poller);me=null;token='';demo=false;announced.clear();generation=null;$('#nav').hidden=true;$('#logout').hidden=true;
  page('<h1>Seu treino no TrackFit</h1><div class="hero"><h2>Experimente como aluno e treinador</h2><p>Abra uma ficha fictícia, registre uma série e revise o treino.</p><button id="demo" class="secondary">Conhecer a demonstração</button></div><h2>Entrar no piloto</h2>'+input('server','Endereço do servidor','http://10.0.2.2:8000','url')+input('code','Código privado de acesso','','password')+'<button id="enter">Entrar</button><p class="muted"><small>Peça o código ao seu treinador. Nesta fase, use somente dados de teste.</small></p>');
- button('enter',async()=>{origin=$('#server').value.trim().replace(/\/+$/,'');token=$('#code').value.trim();me=await api('GET','/me');window.TrackFitNative?.bindPush?.('');shell();await home();});
- button('demo',async()=>{demo=true;resetDemo();me={name:'Pedro • demonstração',role:'trainer',provider:'demo'};shell();await home();});
+ button('enter',async()=>{origin=$('#server').value.trim().replace(/\/+$/,'');token=$('#code').value.trim();me=await api('GET','/me');catalog=await api('GET','/v1/exercises').catch(()=>[]);window.TrackFitNative?.bindPush?.('');shell();await home();});
+ button('demo',async()=>{demo=true;catalog=[];resetDemo();me={name:'Pedro • demonstração',role:'trainer',provider:'demo'};shell();await home();});
 }
 function shell(){
  $('#logout').hidden=false;$('#nav').hidden=false;
@@ -38,7 +39,8 @@ function shell(){
 async function pollNotifications(){if(!me||me.role!=='trainer')return;const rows=await api('GET','/notifications');for(const n of rows){if(!n.seen&&!announced.has(n.id)){announced.add(n.id);if(!demo)window.TrackFitNative?.notifyReview(n.id);}}}
 async function home(){
  const plans=await api('GET','/plans'), trainer=me.role==='trainer';
- page(`<span class="eyebrow">${trainer?'ÁREA DO TREINADOR':'ÁREA DO ALUNO'}</span><h1>Olá, ${esc(me.name.split(' ')[0])}.</h1><p class="muted">${trainer?'As fichas chegam completas. Você revisa e acompanha por aqui.':'Sua ficha e seu histórico, no mesmo lugar.'}</p>${me.provider==='demo'&&!demo?'<div class="notice">Servidor em modo demonstração: seleção por regras, sem IA real.</div>':''}<div class="hero"><small>${trainer?'PARA ACOMPANHAR':'SEU ESPAÇO'}</small><h2>${trainer?plans.filter(p=>['pending','released'].includes(p.state)).length+' fichas para revisar':'Vamos treinar?'}</h2><p>${trainer?'Revisões e avaliações individuais pendentes.':'Preencha a avaliação para receber sua ficha.'}</p></div>${demo?'<button id="switchDemo" class="secondary">Ver como '+(trainer?'aluno':'treinador')+'</button>':''}<button id="primary">${trainer?'Cadastrar aluno':'Preencher avaliação'}</button><h2>${trainer?'Fichas dos alunos':'Minhas fichas'}</h2><div id="plans"></div><button id="timeline" class="secondary">Consultar histórico completo</button>`);
+ page(`<span class="eyebrow">${trainer?'ÁREA DO TREINADOR':'ÁREA DO ALUNO'}</span><h1>Olá, ${esc(me.name.split(' ')[0])}.</h1><p class="muted">${trainer?'As fichas chegam completas. Você revisa e acompanha por aqui.':'Sua ficha e seu histórico, no mesmo lugar.'}</p>${me.provider==='demo'&&!demo?'<div class="notice">Servidor em modo demonstração: seleção por regras, sem IA real.</div>':''}<div class="hero"><small>${trainer?'PARA ACOMPANHAR':'SEU ESPAÇO'}</small><h2>${trainer?plans.filter(p=>['pending','released'].includes(p.state)).length+' fichas para revisar':'Vamos treinar?'}</h2><p>${trainer?'Revisões e avaliações individuais pendentes.':'Preencha a avaliação para receber sua ficha.'}</p></div>${demo?'<button id="switchDemo" class="secondary">Ver como '+(trainer?'aluno':'treinador')+'</button>':''}<button id="primary">${trainer?'Cadastrar aluno':'Preencher avaliação'}</button><h2>${trainer?'Fichas dos alunos':'Minhas fichas'}</h2><div id="plans"></div><div id="supportHome"></div><button id="timeline" class="secondary">Consultar histórico completo</button>`);
+ if(!demo){$('#supportHome').innerHTML='<button id="inbox">Conversas sobre fichas</button>';button('inbox',supportInbox);}
  button('timeline',()=>timeline(0));button('primary',trainer?newStudent:assessment);button('switchDemo',async()=>{me.role=trainer?'student':'trainer';me.name=trainer?'Ana Demo':'Pedro Demo';shell();await home();});
  if(!plans.length)$('#plans').innerHTML='<div class="empty">Nenhuma ficha ainda. '+(trainer?'Comece cadastrando um aluno e criando seus modelos.':'Sua primeira ficha aparecerá aqui.')+'</div>';
  for(const p of plans){const el=document.createElement('div');el.className='card';el.innerHTML=`<span class="badge ${p.state}">${esc(labels[p.state])}</span><h2>${esc(p.student_name)}</h2><p>${p.days.length?p.days.length+' dias • versão '+p.version:'Avaliação aguardando atendimento'}</p><button>Abrir ficha</button>`;el.querySelector('button').onclick=()=>detail(p.id).catch(e=>toast(e.message));$('#plans').append(el);}
@@ -48,13 +50,47 @@ function assessment(){
  page('<span class="eyebrow">AVALIAÇÃO INICIAL</span><h1>Conte sobre você.</h1><p class="muted">Seu treinador usa estas respostas para definir uma ficha compatível.</p>'+input('age','Idade','','number')+select('goal','Objetivo',goals)+select('experience','Experiência',levels)+select('equipment','Onde vai treinar?',equipment)+'<div class="row"><div>'+input('days','Dias por semana',1,'number')+'</div><div>'+input('minutes','Minutos por treino',40,'number')+'</div></div>'+select('review','Você tem dor, lesão, condição de saúde, está gestante ou tem alguma dúvida sobre treinar?',[['','Selecione uma resposta'],['yes','Sim / tenho dúvida'],['no','Não']])+'<label for="limits">Restrições ou observações</label><textarea id="limits" placeholder="Se houver algo que seu treinador precisa saber"></textarea><div class="notice">Restrições e dúvidas serão encaminhadas para avaliação individual antes da liberação.</div><label><input id="consent" type="checkbox">Autorizo o uso dessas informações para montar e acompanhar minha ficha neste piloto.</label><button id="generate">Solicitar ficha completa</button>');
  button('generate',async()=>{if(!$('#review').value||!$('#consent').checked)throw Error('Responda à pergunta de saúde e marque a autorização.');const profile={age:Number($('#age').value),goal:$('#goal').value,experience:$('#experience').value,equipment:$('#equipment').value,days:Number($('#days').value),minutes:Number($('#minutes').value),needs_review:$('#review').value==='yes',limitations:$('#limits').value.trim(),consent:true};const serialized=JSON.stringify(profile);if(!generation||generation.serialized!==serialized)generation={serialized,id:uuid()};const p=await api('POST','/plans',{request_id:generation.id,profile});generation=null;await detail(p.id);});
 }
-function daysHtml(days){return days.map(d=>`<div class="card"><h2>${esc(d.title)}</h2>${d.exercises.map(e=>`<div class="exercise"><strong>${esc(e.name)}</strong><span>${e.sets} séries × ${e.reps} repetições • ${e.rest_seconds}s descanso</span><small>${esc(e.instructions)}</small></div>`).join('')}</div>`).join('');}
+function catalogHelp(id){
+ const entry=catalog.find(item=>item.exercise_id===id);
+ if(!entry)return '';
+ return '<details><summary>Consultar catálogo</summary><p>'+esc(entry.name)+' • '+esc(entry.equipment)+'</p><ul>'+entry.instructions.map(line=>'<li>'+esc(line)+'</li>').join('')+'</ul></details>';
+}
+function daysHtml(days){return days.map(d=>`<div class="card"><h2>${esc(d.title)}</h2>${d.exercises.map(e=>`<div class="exercise"><strong>${esc(e.name)}</strong><span>${e.sets} séries × ${e.reps} repetições • ${e.rest_seconds}s descanso</span><small>${esc(e.instructions)}</small>${catalogHelp(e.exercise_id)}</div>`).join('')}</div>`).join('');}
 async function detail(id){
  const p=await api('GET','/plans/'+id), trainer=me.role==='trainer';
- page(`<span class="badge ${p.state}">${esc(labels[p.state])}</span><h1>${esc(p.student_name)}</h1><p class="muted">Ficha • versão ${p.version}</p><div class="notice">${esc(p.note)}</div>${trainer?`<details><summary>Ver avaliação</summary><div class="card">${Object.entries({Idade:p.profile.age,Objetivo:p.profile.goal,Experiência:p.profile.experience,Dias:p.profile.days,Minutos:p.profile.minutes,Local:p.profile.equipment,'Requer avaliação':p.profile.needs_review?'Sim':'Não',Observações:p.profile.limitations||'Nenhuma'}).map(([k,v])=>`<div class="summary"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join('')}</div></details>`:''}${daysHtml(p.days)}${!p.days.length?'<div class="empty">Seu treinador precisa concluir a avaliação antes de liberar os exercícios.</div>':''}<div id="actions"></div>`);
+ page(`<span class="badge ${p.state}">${esc(labels[p.state])}</span><h1>${esc(p.student_name)}</h1><p class="muted">Ficha • versão ${p.version}</p><div class="notice">${esc(p.note)}</div>${trainer?`<details><summary>Ver avaliação</summary><div class="card">${Object.entries({Idade:p.profile.age,Objetivo:p.profile.goal,Experiência:p.profile.experience,Dias:p.profile.days,Minutos:p.profile.minutes,Local:p.profile.equipment,'Requer avaliação':p.profile.needs_review?'Sim':'Não',Observações:p.profile.limitations||'Nenhuma'}).map(([k,v])=>`<div class="summary"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join('')}</div></details>`:''}${daysHtml(p.days)}${!p.days.length?'<div class="empty">Seu treinador precisa concluir a avaliação antes de liberar os exercícios.</div>':''}<div id="actions"></div><div id="supportLink"></div>`);
+ if(!demo){$('#supportLink').innerHTML='<button class="secondary" id="openSupport">Conversa sobre esta ficha</button>';button('openSupport',()=>conversation(id));}
  if(trainer){$('#actions').innerHTML='<button id="approve">Marcar como revisada</button><button id="edit" class="secondary">Editar ficha completa</button><button id="suspend" class="danger">Suspender ficha</button>';button('approve',()=>reviewNote(p,'approve'));button('edit',()=>editPlan(p));button('suspend',()=>reviewNote(p,'suspend'));}
  else if(['released','reviewed'].includes(p.state)){
  $('#actions').innerHTML=select('day','Qual treino fará agora?',p.days.map((d,i)=>[i,esc(d.title)]))+'<button id="start">Iniciar treino</button>';const requestId=uuid();button('start',async()=>{const s=await api('POST',`/plans/${id}/sessions`,{request_id:requestId,expected_version:p.version,day:Number($('#day').value)});sessionView(s);});}
+}
+async function supportInbox(){
+ const rows=await api('GET','/support');
+ page('<h1>Conversas sobre fichas</h1><div id="threads"></div>');
+ if(!rows.length)$('#threads').textContent='Nenhuma conversa. Abra uma ficha para enviar uma mensagem.';
+ for(const item of rows){
+   const b=document.createElement('button');
+   b.textContent=item.student_name+' • '+(item.role==='student'?'Última mensagem do aluno':'Última mensagem do treinador');
+   b.onclick=()=>conversation(item.plan).catch(e=>toast(e.message));$('#threads').append(b);
+ }
+}
+async function conversation(id){
+ const rows=await api('GET','/plans/'+id+'/support');
+ page('<h1>Conversa sobre a ficha</h1><button id="backPlan" class="secondary">Ver ficha</button><div id="messages"></div><label for="question">Mensagem</label><textarea id="question" maxlength="1200"></textarea><button id="sendMessage">Enviar</button>');
+ button('backPlan',()=>detail(id));
+ for(const row of rows){
+   const card=document.createElement('div');card.className='card';
+   const title=document.createElement('strong');title.textContent=(row.role==='trainer'?'Treinador':'Aluno')+' • versão '+row.version;
+   const message=document.createElement('p');message.textContent=row.message;
+   card.append(title,message);$('#messages').append(card);
+ }
+ let pending;
+ button('sendMessage',async()=>{
+   const message=$('#question').value.trim();if(!message)throw Error('Escreva uma mensagem.');
+   if(pending?.message!==message)pending={message,request_id:uuid()};
+   await api('POST','/plans/'+id+'/support',pending);
+   await conversation(id);
+ });
 }
 function reviewNote(p,action){page('<h1>'+ (action==='approve'?'Concluir revisão':'Suspender ficha')+'</h1><p>'+ (action==='approve'?'Confirme após avaliar a ficha e as informações do aluno.':'A suspensão impede novos treinos e interrompe sessões ativas.')+'</p><label for="note">Motivo / orientação</label><textarea id="note"></textarea><button id="save">Confirmar</button>');button('save',async()=>{await api('POST',`/plans/${p.id}/review`,{action,expected_version:p.version,note:$('#note').value});await detail(p.id);});}
 function dayEditor(days){
@@ -63,9 +99,23 @@ function dayEditor(days){
  box.querySelector('.add-exercise').onclick=()=>addExercise(list);$('#editor').append(box);});
 }
 function addExercise(parent,e={name:'',sets:2,reps:10,rest_seconds:60,instructions:''}){
- const row=document.createElement('div');row.className='exercise editor-row';row.innerHTML='<label>Nome do exercício</label><input class="ex-name" value="'+esc(e.name)+'"><div class="row"><div><label>Séries</label><input class="ex-sets" type="number" value="'+e.sets+'"></div><div><label>Repetições</label><input class="ex-reps" type="number" value="'+e.reps+'"></div><div><label>Descanso (s)</label><input class="ex-rest" type="number" value="'+e.rest_seconds+'"></div></div><label>Orientações de execução e carga</label><textarea class="ex-instructions">'+esc(e.instructions)+'</textarea><button class="ghost remove">Remover</button>';row.querySelector('.remove').onclick=()=>row.remove();parent.append(row);
+ const row=document.createElement('div');row.className='exercise editor-row';row.innerHTML='<label>Nome do exercício</label><input class="ex-name" value="'+esc(e.name)+'"><div class="row"><div><label>Séries</label><input class="ex-sets" type="number" value="'+e.sets+'"></div><div><label>Repetições</label><input class="ex-reps" type="number" value="'+e.reps+'"></div><div><label>Descanso (s)</label><input class="ex-rest" type="number" value="'+e.rest_seconds+'"></div></div><label>Orientações de execução e carga</label><textarea class="ex-instructions">'+esc(e.instructions)+'</textarea><button class="ghost remove">Remover</button>';row.dataset.catalogId=e.exercise_id||'';
+ if(catalog.length){
+   const label=document.createElement('label');label.textContent='Referência do catálogo';
+   const picker=document.createElement('select');picker.add(new Option('Exercício personalizado',''));
+   for(const entry of catalog)picker.add(new Option(entry.name,entry.exercise_id));
+   picker.value=row.dataset.catalogId;
+   picker.onchange=()=>{
+     row.dataset.catalogId=picker.value;
+     const entry=catalog.find(item=>item.exercise_id===picker.value);
+     if(entry){row.querySelector('.ex-name').value=entry.name;row.querySelector('.ex-instructions').value=entry.instructions.join(' ');}
+   };
+   row.querySelector('.ex-name').oninput=()=>{picker.value='';row.dataset.catalogId='';};
+   label.append(picker);row.prepend(label);
+ }
+ row.querySelector('.remove').onclick=()=>row.remove();parent.append(row);
 }
-function readDays(){return [...document.querySelectorAll('.day-edit')].map((d,i)=>({title:$('#title'+i).value,exercises:[...d.querySelectorAll('.editor-row')].map(e=>({name:e.querySelector('.ex-name').value,sets:Number(e.querySelector('.ex-sets').value),reps:Number(e.querySelector('.ex-reps').value),rest_seconds:Number(e.querySelector('.ex-rest').value),instructions:e.querySelector('.ex-instructions').value}))}));}
+function readDays(){return [...document.querySelectorAll('.day-edit')].map((d,i)=>({title:$('#title'+i).value,exercises:[...d.querySelectorAll('.editor-row')].map(e=>({...e.dataset.catalogId?{exercise_id:e.dataset.catalogId}:{},name:e.querySelector('.ex-name').value,sets:Number(e.querySelector('.ex-sets').value),reps:Number(e.querySelector('.ex-reps').value),rest_seconds:Number(e.querySelector('.ex-rest').value),instructions:e.querySelector('.ex-instructions').value}))}));}
 function editPlan(p){page('<span class="eyebrow">REVISÃO PROFISSIONAL</span><h1>Ajustar ficha.</h1><p>A nova versão será usada nos próximos treinos. A sessão em andamento mantém sua ficha original.</p><div id="editor"></div><label for="note">O que você avaliou e alterou?</label><textarea id="note"></textarea><button id="save">Salvar e liberar versão revisada</button>');dayEditor(p.days.length?p.days:Array.from({length:p.profile.days},(_,i)=>({title:'Treino '+(i+1),exercises:[]})));button('save',async()=>{await api('POST',`/plans/${p.id}/review`,{action:'edit',expected_version:p.version,note:$('#note').value,days:readDays()});await detail(p.id);});}
 async function templates(){const rows=await api('GET','/templates');page('<span class="eyebrow">SUA BASE PROFISSIONAL</span><h1>Modelos de treino.</h1><p>Somente modelos aprovados podem ser selecionados automaticamente. Aprovar um modelo não aprova todas as fichas já geradas.</p><button id="newTemplate">Criar modelo</button><div id="templates"></div>');button('newTemplate',newTemplate);for(const t of rows){const el=document.createElement('div');el.className='card';el.innerHTML=`<span class="badge">${t.approved?'Aprovado para seleção':'Rascunho'}</span><h2>${esc(t.data.name)}</h2><p>${esc(t.data.goal)} • ${t.data.days.length} dias • ${t.data.minutes} min<br>${esc(t.data.experience)} • ${esc(t.data.equipment)} • ${t.data.min_age}–${t.data.max_age} anos</p><details><summary>Ver ficha completa</summary>${daysHtml(t.data.days)}</details><button>${t.approved?'Retirar da seleção automática':'Aprovar este modelo'}</button>`;el.querySelector('button').onclick=async()=>{try{await api('POST',`/templates/${t.id}/approval`,{approved:!t.approved});await templates();}catch(e){toast(e.message);}};$('#templates').append(el);}if(!rows.length)$('#templates').innerHTML='<p class="empty">Nenhum modelo. A liberação automática está desativada até você criar e aprovar um.</p>';}
 function newTemplate(){page('<span class="eyebrow">NOVO MODELO</span><h1>Sua ficha de referência.</h1>'+input('modelName','Nome do modelo')+select('goal','Objetivo',goals)+select('experience','Experiência',levels)+select('equipment','Equipamentos',equipment)+input('minutes','Duração estimada por treino (minutos)',40,'number')+'<div class="row"><div>'+input('minAge','Idade mínima',18,'number')+'</div><div>'+input('maxAge','Idade máxima',60,'number')+'</div></div>'+input('dayCount','Dias por semana',1,'number')+'<button id="makeDays" class="secondary">Preparar os dias</button><div id="editor"></div><button id="save">Salvar como rascunho</button>');dayEditor([{title:'Treino 1',exercises:[]}]);button('makeDays',()=>{const count=Number($('#dayCount').value);if(count<1||count>6||!Number.isInteger(count))throw Error('Escolha de 1 a 6 dias.');const current=readDays();if(count<current.length)throw Error('Para reduzir dias, abra um novo modelo. Isso evita apagar seu trabalho.');dayEditor(Array.from({length:count},(_,i)=>current[i]||{title:'Treino '+(i+1),exercises:[]}));});button('save',async()=>{await api('POST','/templates',{name:$('#modelName').value,goal:$('#goal').value,experience:$('#experience').value,equipment:$('#equipment').value,minutes:Number($('#minutes').value),min_age:Number($('#minAge').value),max_age:Number($('#maxAge').value),days:readDays()});await templates();});}

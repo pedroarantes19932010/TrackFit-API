@@ -17,6 +17,16 @@ class Profile(Strict):
     consent: Literal[True]
 
 class Exercise(Strict):
+    exercise_id: str | None = None
+
+    @field_validator("exercise_id")
+    @classmethod
+    def known_catalog_id(cls,value):
+        from trackfit_api.catalog_routes import CATALOG
+        if value is not None and not any(e.exercise_id == value for e in CATALOG):
+            raise ValueError("Referência de catálogo desconhecida.")
+        return value
+
     name: str = Field(min_length=2, max_length=100)
     sets: int = Field(ge=1, le=6)
     reps: int = Field(ge=1, le=30)

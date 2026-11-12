@@ -13,7 +13,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from trackfit_api.identity import current_user, request_database
 from trackfit_api.auth_routes import router as auth_router
 from trackfit_api.workout_routes import router as workout_router
-from server import push, timeline
+from server import push, timeline, support
+from trackfit_api.catalog_routes import router as catalog_router
 from datetime import datetime
 from server.accounts import add_code_account, prepare_accounts
 from server.models import (Generate, Review, Template, TemplateApproval, NewStudent, Start, Finish)
@@ -69,13 +70,14 @@ def create_app(db_path=None, mode=None, chooser=None):
 
     with db(True) as conn:
         prepare_accounts(conn)
-        for statement in (SCHEMA + push.SCHEMA).split(";"):
+        for statement in (SCHEMA + push.SCHEMA + support.SCHEMA).split(";"):
             if statement.strip():
                 conn.execute(statement)
     push_enabled = os.getenv("TRACKFIT_PUSH") == "fcm"
     app = FastAPI(title="TrackFit — piloto", version="0.2.0", lifespan=push.worker_lifespan(db,push_enabled))
     app.state.db = db
 
+    app.include_router(catalog_router)
     app.include_router(auth_router)
     app.include_router(workout_router)
 
@@ -161,7 +163,7 @@ def create_app(db_path=None, mode=None, chooser=None):
             raise HTTPException(422, "Faixa de idade inválida.")
         template_id = uid()
         with db(True) as conn:
-            conn.execute("INSERT INTO templates VALUES(?,?,?,0)", (template_id, user["id"], packed(body.model_dump())))
+            conn.execute("INSERT INTO templates VALUES(?,?,?,0)", (template_id, user["id"], packed(body.model_dump(exclude_none=True))))
         return {"id": template_id, "approved": False}
 
     @app.post("/templates/{template_id}/approval")
@@ -242,7 +244,7 @@ def create_app(db_path=None, mode=None, chooser=None):
             if body.action == "edit":
                 if not body.days:
                     raise HTTPException(422, "Informe a ficha completa revisada.")
-                days = [d.model_dump() for d in body.days]
+                days = [d.model_dump(exclude_none=True) for d in body.days]
                 if len(days) != json.loads(plan["profile"])["days"]:
                     raise HTTPException(422, "A quantidade de dias deve corresponder à avaliação.")
             elif body.days is not None:
@@ -333,7 +335,7 @@ def create_app(db_path=None, mode=None, chooser=None):
             row = conn.execute("SELECT * FROM training_sessions WHERE id=? AND student=?", (session_id,user["id"])).fetchone()
             if not row:
                 raise HTTPException(404, "Treino não encontrado.")
-            actual = packed(body.model_dump())
+            actual = packed(body.model_dump(exclude_none=True))
             if row["state"] == "finished" and row["actual"] == actual:
                 return show_session(row)
             if row["state"] != "active":
@@ -348,4 +350,5 @@ def create_app(db_path=None, mode=None, chooser=None):
             conn.execute("UPDATE training_sessions SET state='finished',actual=? WHERE id=?", (actual,session_id))
             return show_session(conn.execute("SELECT * FROM training_sessions WHERE id=?", (session_id,)).fetchone())
 
+    support.install(app, db, auth, get_plan)
     return app
