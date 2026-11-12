@@ -5,15 +5,25 @@ import urllib.error
 import urllib.request
 
 from trackfit_api.workouts import Exercise, WorkoutError
+from trackfit_api.catalog_routes import CATALOG as EXERCISE_CATALOG
 
 # Catálogo deliberadamente restrito para testes; não constitui prescrição clínica.
+# IDs legados mantidos para compatibilidade com o prompt e os testes.
+# Os nomes vêm da biblioteca única exposta ao aplicativo.
+AI_TO_CATALOG_ID = {
+    "agachamento_livre": "squat_bodyweight",
+    "remada_sentada": "seated_row",
+    "supino_maquina": "machine_chest_press",
+    "puxada_frontal": "lat_pulldown",
+    "cadeira_extensora": "leg_extension",
+    "mesa_flexora": "leg_curl",
+}
+_catalog_by_id = {exercise.exercise_id: exercise for exercise in EXERCISE_CATALOG}
+if not set(AI_TO_CATALOG_ID.values()).issubset(_catalog_by_id):
+    raise RuntimeError("Catálogo público e gerador de IA inconsistentes")
 CATALOG = {
-    "agachamento_livre": "Agachamento livre",
-    "remada_sentada": "Remada sentada",
-    "supino_maquina": "Supino na máquina",
-    "puxada_frontal": "Puxada frontal",
-    "cadeira_extensora": "Cadeira extensora",
-    "mesa_flexora": "Mesa flexora",
+    ai_id: _catalog_by_id[catalog_id].name
+    for ai_id, catalog_id in AI_TO_CATALOG_ID.items()
 }
 MAX_BYTES = 12000
 
