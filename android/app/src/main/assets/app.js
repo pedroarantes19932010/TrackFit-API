@@ -3,7 +3,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const app=$('#app'); let token='',origin='',me=null,demo=false,poller=null,requestCount=0;
 const awaiting=new Map(), announced=new Set();
-let catalog=[], offline=false;
+let catalog=[], offline=false, restInterval=null;
 let generation=null, pushBinding=null;
 const labels={pending:'Aguardando avaliação',released:'Revisão pendente',reviewed:'Revisada pelo treinador',suspended:'Suspensa'};
 function uuid(){
@@ -23,7 +23,7 @@ function api(method,path,body={}){
  return new Promise((resolve,reject)=>{const id=String(++requestCount);const timer=setTimeout(()=>{awaiting.delete(id);reject(new Error('A conexão demorou. Tente novamente.'));},55000);awaiting.set(id,{resolve,reject,timer});TrackFitNative.request(id,origin,token,method,path,JSON.stringify(body));});
 }
 function button(id,action){$('#'+id)?.addEventListener('click',async e=>{const b=e.currentTarget;b.disabled=true;try{await action();}catch(err){toast(err.message);}finally{b.disabled=false;}});}
-function page(html){app.innerHTML=(demo?'<div class="demo-banner">DEMONSTRAÇÃO OFFLINE • Dados fictícios. Nada é enviado ou prescrito. Ao sair, tudo é apagado.</div>':'')+html;window.scrollTo(0,0);}
+function page(html){clearInterval(restInterval);restInterval=null;app.innerHTML=(demo?'<div class="demo-banner">DEMONSTRAÇÃO OFFLINE • Dados fictícios. Nada é enviado ou prescrito. Ao sair, tudo é apagado.</div>':'')+html;window.scrollTo(0,0);}
 function input(id,label,value='',type='text'){return `<label for="${id}">${label}</label><input id="${id}" type="${type}" value="${esc(value)}">`;}
 function select(id,label,options){return `<label for="${id}">${label}</label><select id="${id}">${options.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select>`;}
 const goals=[['condicionamento','Condicionamento'],['hipertrofia','Hipertrofia']];
@@ -274,6 +274,30 @@ function finishPayload() {
  if(!sets.length)throw Error('Registre ao menos uma série realizada.');
  return {sets,note:$('#note').value};
 }
+function restTimer(container,exercise){
+ const control=document.createElement('button');
+ control.className='secondary rest-start';
+ control.textContent='Iniciar descanso • '+exercise.rest_seconds+' s';
+ container.append(control);
+ control.onclick=()=>{
+   clearInterval(restInterval);
+   document.querySelector('.rest-clock')?.remove();
+   const end=Date.now()+exercise.rest_seconds*1000;
+   const panel=document.createElement('div');
+   panel.className='rest-clock';
+   panel.innerHTML='<span role="timer"></span> <button type="button" class="secondary">Encerrar descanso</button>';
+   control.after(panel);
+   const display=panel.firstElementChild;
+   panel.lastElementChild.onclick=()=>{clearInterval(restInterval);panel.remove();};
+   function tick(){
+     const seconds=Math.max(0,Math.ceil((end-Date.now())/1000));
+     if(seconds===0){clearInterval(restInterval);display.textContent='Descanso concluído.';return;}
+     display.textContent='Descanso '+Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0');
+   }
+   restInterval=setInterval(tick,250);
+   tick();
+ };
+}
 function sessionView(s,planDays){
  const native=demo?null:window.TrackFitNative;
  const scope=JSON.stringify([origin,me.id,s.id]);
@@ -297,7 +321,11 @@ function sessionView(s,planDays){
  }else{native?.storeFinish?.(scope,'');}
 
  page('<span class="eyebrow">TREINO • VERSÃO '+s.version+'</span><h1>'+esc(s.snapshot.title)+'</h1><div class="notice">Registre somente o que realizou. A carga não é sugerida automaticamente. Zero significa ausência de carga externa. Campos vazios não são registrados.</div><div id="sets"></div>'+ (s.state==='active'?'<label for="note">Observações</label><textarea id="note" maxlength="1000"></textarea><p id="saveState" role="status"></p><button id="finish">Salvar treino realizado</button>':'<p>Este registro está '+esc(s.state==='finished'?'concluído':'suspenso')+'.</p>'));
- for(let i=0;i<s.snapshot.exercises.length;i++){const e=s.snapshot.exercises[i];const box=document.createElement('div');box.className='card';box.innerHTML='<h2>'+esc(e.name)+'</h2><p>'+esc(e.instructions)+'</p><small>Referência: '+e.sets+' × '+e.reps+' • '+e.rest_seconds+'s de descanso</small>'+catalogHelp(e.exercise_id);for(let j=0;j<e.sets;j++){const actual=(s.actual||pending||editing)?.sets.find(x=>x.exercise_index===i&&x.set_index===j);const row=document.createElement('div');row.className='row set-row';row.dataset.exercise=i;row.dataset.set=j;row.innerHTML='<div><label>Série '+(j+1)+' • kg</label><input class="weight" maxlength="16" inputmode="decimal" value="'+esc(actual?.weight_kg??'')+'" '+(s.state!=='active'?'disabled':'')+'></div><div><label>Repetições realizadas</label><input class="reps" type="number" value="'+esc(actual?.reps??'')+'" '+(s.state!=='active'?'disabled':'')+'></div>';box.append(row);}$('#sets').append(box);}
+ for(let i=0;i<s.snapshot.exercises.length;i++){const e=s.snapshot.exercises[i];const box=document.createElement('div');box.className='card';box.innerHTML='<h2>'+esc(e.name)+'</h2><p>'+esc(e.instructions)+'</p><small>Referência: '+e.sets+' × '+e.reps+' • '+e.rest_seconds+'s de descanso</small>'+catalogHelp(e.exercise_id);for(let j=0;j<e.sets;j++){const actual=(s.actual||pending||editing)?.sets.find(x=>x.exercise_index===i&&x.set_index===j);const row=document.createElement('div');row.className='row set-row';row.dataset.exercise=i;row.dataset.set=j;row.innerHTML='<div><label>Série '+(j+1)+' • kg</label><input class="weight" maxlength="16" inputmode="decimal" value="'+esc(actual?.weight_kg??'')+'" '+(s.state!=='active'?'disabled':'')+'></div><div><label>Repetições realizadas</label><input class="reps" type="number" value="'+esc(actual?.reps??'')+'" '+(s.state!=='active'?'disabled':'')+'></div>';const previous=s.snapshot.previous_sets?.find(v=>v.exercise_index===i&&v.set_index===j);
+ if(previous){const hint=document.createElement('small');hint.className='previous-set';hint.textContent='Último treino: '+previous.weight_kg.toLocaleString('pt-BR')+' kg × '+previous.reps+' rep.';row.firstElementChild.append(hint);}
+ box.append(row);}
+ if(s.state==='active')restTimer(box,e);
+ $('#sets').append(box);}
  if(downloadMessage||offline){
    const banner=document.createElement('p');
    banner.className='notice';

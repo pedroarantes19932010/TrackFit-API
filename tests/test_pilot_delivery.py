@@ -119,6 +119,10 @@ class AIContract(unittest.TestCase):
         client=httpx.Client(transport=httpx.MockTransport(transport))
         with patch.dict(os.environ,{"OPENAI_API_KEY":"test-only","OPENAI_MODEL":"test-model"}),patch('server.provider.httpx.Client',return_value=client):
             result=choose_template(PROFILE|{'limitations':'private-text'},[{'id':'allowed','data':TEMPLATE}],'openai')
+        import json
+        supplied=json.loads(json.loads(sent[0])["input"])
+        self.assertEqual(supplied["minutos_disponiveis"],PROFILE["minutes"])
+        self.assertEqual(supplied["fichas"][0]["minutos_previstos"],TEMPLATE["minutes"])
         self.assertNotIn('private-text',sent[0])
         return result
 

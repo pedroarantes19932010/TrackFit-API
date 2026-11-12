@@ -52,6 +52,21 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(r.status_code,200,r.text)
         self.assertEqual(r.json()['actual'],body)
         self.assertEqual(len(self.client.get('/notifications',headers=self.t).json()),1)
+    def test_previous_sets_follow_same_version_and_never_prefill(self):
+        self.template()
+        plan=self.generate().json()
+        sets=[dict(exercise_index=0,set_index=1,weight_kg=0,reps=7)]
+        for index in range(2):
+            session=self.start(plan)
+            self.assertIsNone(session['actual'])
+            self.assertEqual(session['snapshot'].get('previous_sets',[]), sets if index else [])
+            result=self.client.post(f"/sessions/{session['id']}/finish",headers=self.s,json={'sets':sets,'note':'Privado'})
+            self.assertEqual(result.status_code,200)
+        review=self.client.post(f"/plans/{plan['id']}/review",headers=self.t,json={
+            'action':'edit','expected_version':1,'note':'Mudou o exercício','days':[DAY]})
+        self.assertEqual(review.status_code,200)
+        self.assertNotIn('previous_sets', self.start(plan|{'version':2})['snapshot'])
+
     def test_idempotent_plan_and_notification(self):
         self.template(); body={'request_id':str(uuid4()),'profile':PROFILE}
         a=self.client.post('/plans',headers=self.s,json=body)

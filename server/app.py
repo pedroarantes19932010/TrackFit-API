@@ -325,8 +325,15 @@ def create_app(db_path=None, mode=None, chooser=None):
             days = json.loads(conn.execute("SELECT data FROM versions WHERE plan=? AND version=?", (plan_id,plan["version"])).fetchone()[0])
             if body.day >= len(days):
                 raise HTTPException(422, "Dia inválido.")
+            day = days[body.day]
+            previous = conn.execute("""SELECT actual FROM training_sessions
+                WHERE student=? AND plan=? AND version=? AND day=? AND state='finished'
+                ORDER BY created DESC, rowid DESC LIMIT 1""",
+                (user["id"], plan_id, plan["version"], body.day)).fetchone()
+            if previous:
+                day["previous_sets"] = json.loads(previous["actual"])["sets"]
             session_id = uid()
-            conn.execute("INSERT INTO training_sessions VALUES(?,?,?,?,?,?,?,?,?,?)", (session_id,user["id"],plan_id,plan["version"],body.day,packed(days[body.day]),"active",None,body.request_id,time.time()))
+            conn.execute("INSERT INTO training_sessions VALUES(?,?,?,?,?,?,?,?,?,?)", (session_id,user["id"],plan_id,plan["version"],body.day,packed(day),"active",None,body.request_id,time.time()))
             return show_session(conn.execute("SELECT * FROM training_sessions WHERE id=?", (session_id,)).fetchone())
 
     @app.post("/sessions/{session_id}/finish")

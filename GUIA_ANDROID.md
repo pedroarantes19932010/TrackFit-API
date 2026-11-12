@@ -52,3 +52,15 @@ No piloto conectado, abra **Vídeos**, escolha o exercício, cole o link do YouT
 2. Se fechar o app, abra-o, informe o mesmo código e toque em **Abrir treino baixado**. O endereço do último servidor fica preenchido. A sessão do dia aceita cargas, repetições e observações. A opção **Consultar ficha baixada** mostra também os demais dias baixados. Apenas o dia iniciado aceita registros.
 3. Toque em **Salvar treino realizado**. Sem conexão, o registro permanece no aparelho. Com a tela offline aberta e um envio pendente, o app tenta enviar quando o Android informa que a rede voltou. Você também pode tocar em **Tentar confirmar novamente**. Aguarde a confirmação do servidor.
 4. Revisões e suspensões feitas pelo treinador só chegam com internet. O servidor confere o estado da sessão ao receber o registro. O download da sessão é removido após a confirmação. Mensagens, vídeos do YouTube e novas sessões precisam de conexão.
+
+## Avaliar as escolhas da IA
+
+O arquivo examples/avaliacoes_ficticias.json contém dois casos fictícios para entender o processo. Os rótulos são exemplos de preferência, sem validação profissional. Na raiz do projeto, execute:
+
+```sh
+python -m server.evaluate_selector examples/avaliacoes_ficticias.json
+```
+
+O modo demo seleciona o primeiro candidato. Para preparar a sua avaliação, use perfis fictícios, ofereça somente fichas elegíveis e preencha expected com o ID da ficha que escolheria. Inclua escolhas difíceis com duas ou mais fichas e varie a ordem dos candidatos. Mantenha alguns casos separados para testar mudanças futuras. Compare as divergências antes e depois de mudar as instruções de seleção.
+
+Com as credenciais de API configuradas no ambiente, a opção `--provider openai` consulta o modelo uma vez por caso e pode gerar cobrança. Esse comando mede a concordância com os rótulos do treinador. Ele não atualiza os pesos do modelo nem altera as fichas do aplicativo.

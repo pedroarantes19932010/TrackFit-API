@@ -126,6 +126,10 @@ async function connected(page) {
     await page.getByText(/Nenhum treino baixado/).waitFor();
     await page.locator('#code').fill(student.access_code);
     await page.locator('#resumeOffline').click();
+    await page.locator('.rest-start').first().click();
+    await page.getByRole('timer').waitFor();
+    await page.getByRole('button',{name:'Encerrar descanso'}).click();
+    assert.equal(await page.getByRole('timer').count(),0);
     await page.getByText('Consultar ficha baixada').click();
     assert.equal(await page.locator('.weight').inputValue(),'12,5');
     assert.equal(await page.locator('#note').inputValue(),'Parcial do teste');
