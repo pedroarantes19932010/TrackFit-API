@@ -1,0 +1,7 @@
+**
+!Dockerfile
+!server/
+!server/*.py
+!server/requirements*.txt
+!trackfit_api/
+!trackfit_api/*.py

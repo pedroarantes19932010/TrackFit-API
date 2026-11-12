@@ -9,10 +9,12 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from trackfit_api.identity import current_user, request_database
 from trackfit_api.auth_routes import router as auth_router
 from trackfit_api.workout_routes import router as workout_router
+from server import push, timeline
+from datetime import datetime
 from server.accounts import add_code_account, prepare_accounts
 from server.models import (Generate, Review, Template, TemplateApproval, NewStudent, Start, Finish)
 from server.provider import choose_template, ProviderError
@@ -67,10 +69,11 @@ def create_app(db_path=None, mode=None, chooser=None):
 
     with db(True) as conn:
         prepare_accounts(conn)
-        for statement in SCHEMA.split(";"):
+        for statement in (SCHEMA + push.SCHEMA).split(";"):
             if statement.strip():
                 conn.execute(statement)
-    app = FastAPI(title="TrackFit — piloto", version="0.1.0")
+    push_enabled = os.getenv("TRACKFIT_PUSH") == "fcm"
+    app = FastAPI(title="TrackFit — piloto", version="0.2.0", lifespan=push.worker_lifespan(db,push_enabled))
     app.state.db = db
 
     app.include_router(auth_router)
@@ -126,8 +129,11 @@ def create_app(db_path=None, mode=None, chooser=None):
         out.pop("request_hash", None)
         return out
 
-    def notify(conn, plan, message):
-        conn.execute("INSERT INTO notifications VALUES(?,?,?,?,?,0)", (uid(), plan["trainer"], plan["id"], message, time.time()))
+    def notify(conn, plan, message, complete=False):
+        event = uid()
+        conn.execute("INSERT INTO notifications VALUES(?,?,?,?,?,0)", (event, plan["trainer"], plan["id"], message, time.time()))
+        if complete:
+            push.enqueue(conn,event,plan["trainer"])
 
     @app.get("/health")
     def health():
@@ -212,7 +218,7 @@ def create_app(db_path=None, mode=None, chooser=None):
             conn.execute("INSERT INTO plans VALUES(?,?,?,?,?,?,?,?,?,?,?)", (plan_id,user["id"],user["trainer"],body.request_id,payload_hash,packed(profile),1,state,provider_mode,chosen["id"] if chosen else None,time.time()))
             conn.execute("INSERT INTO versions VALUES(?,?,?,?,?)", (plan_id,1,packed(days),note,time.time()))
             plan = get_plan(conn, plan_id, user)
-            notify(conn, plan, "Ficha completa gerada para revisão." if days else "Avaliação aguardando atendimento antes de gerar ficha.")
+            notify(conn, plan, "Ficha completa gerada para revisão." if days else "Avaliação aguardando atendimento antes de gerar ficha.", complete=bool(days))
             return show_plan(conn, plan, user)
 
     @app.get("/plans")
@@ -251,6 +257,30 @@ def create_app(db_path=None, mode=None, chooser=None):
             if state == "suspended":
                 conn.execute("UPDATE training_sessions SET state='suspended' WHERE plan=? AND state='active'", (plan_id,))
             return show_plan(conn, get_plan(conn, plan_id, user), user)
+
+    @app.get("/history")
+    def unified_history(offset: int = Query(0, ge=0), limit: int = Query(30, ge=1, le=100), user=Depends(auth)):
+        with db() as conn:
+            return timeline.history(conn,user,offset,limit)
+
+    @app.get("/history/page/{page}")
+    def history_page(page: int, user=Depends(auth)):
+        if page < 0 or page > 100000:
+            raise HTTPException(422, "Página inválida.")
+        with db() as conn:
+            return timeline.history(conn,user,30*page,30)
+
+    @app.post("/push/devices")
+    def register_device(body: push.Device, authorization: str = Header(), user=Depends(trainer)):
+        if not push_enabled:
+            raise HTTPException(503, "Envio em segundo plano ainda não configurado no servidor.")
+        with db(True) as conn:
+            row = conn.execute("SELECT expires_at FROM sessions WHERE token_hash=? AND user_id=?",
+                               (digest(authorization[7:]),user["id"])).fetchone()
+            if not row:
+                raise HTTPException(401, "Entre novamente.")
+            push.register(conn,user["id"],body,datetime.fromisoformat(row[0]).timestamp())
+        return {"ok":True}
 
     @app.get("/notifications")
     def notifications(user=Depends(trainer)):

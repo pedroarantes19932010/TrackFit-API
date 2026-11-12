@@ -7,11 +7,11 @@ O APK de teste está em [downloads/TrackFit-Piloto.apk](downloads/TrackFit-Pilot
 3. Toque em **Solicitar ficha completa**. A ficha aparece com revisão pendente e já permite iniciar o treino. O teste usa um modelo fictício de um dia. Outros perfis podem precisar de revisão.
 4. Registre uma série fictícia e salve. Em **Minhas fichas**, volte para **Ver como treinador**. Abra **Avisos**, escolha a nova ficha e edite um exercício. A revisão cria uma versão nova. O histórico guarda a versão da sessão realizada.
 
-A demonstração roda em memória. Sair ou fechar apaga os exemplos. O servidor do piloto usa SQLite para guardar treinos entre sessões. O aviso de geração aparece quando a ficha fica completa. No Android conectado, o app consulta a caixa de avisos a cada 30 segundos enquanto está aberto. O envio em segundo plano ainda está pendente.
+A demonstração roda em memória. Sair ou fechar apaga os exemplos. O servidor do piloto usa SQLite para guardar treinos entre sessões. O aviso de geração aparece quando a ficha fica completa. No Android conectado, o app consulta a caixa de avisos a cada 30 segundos enquanto está aberto. Com Firebase configurado no APK e no servidor, ative os avisos em **Avisos** para recebê-los em segundo plano.
 
 ## Rodar o piloto conectado
 
-O serviço iniciado abaixo atende o Android, /v1/auth e /v1/workouts usando o mesmo cadastro, vínculo e sessão de acesso. Um aluno cadastrado pelo treinador já pode ser identificado pela API v1. O piloto mantém as fichas de vários dias em /plans e os treinos simples da API anterior em /v1/workouts. Esses formatos ainda têm históricos separados.
+O serviço iniciado abaixo atende o Android, /v1/auth e /v1/workouts usando o mesmo cadastro, vínculo e sessão de acesso. Um aluno cadastrado pelo treinador já pode ser identificado pela API v1. O piloto mantém as fichas de vários dias em /plans e os treinos simples da API anterior em /v1/workouts. A tela **Consultar histórico completo** reúne versões dos dois formatos e sessões realizadas, preservando a origem.
 
 O serviço usa TRACKFIT_DB_PATH ou TRACKFIT_DB. Se ambas estiverem configuradas, devem apontar para o mesmo arquivo. Um banco antigo do piloto é convertido em uma transação na inicialização. Códigos, vencimentos e sessões de treino são preservados. Antes de atualizar uma instalação, pare os processos e faça backup do banco. Se já existirem dois arquivos distintos com dados, mantenha ambos: a atualização não combina contas de arquivos separados. No piloto Android o aluno precisa ter um único treinador responsável. Use dados fictícios nos testes.
 
@@ -30,4 +30,4 @@ Por padrão o servidor seleciona modelos por regras. Para experimentar a integra
 
 ## Verificação
 
-Execute python -m unittest discover -s tests -v na raiz após instalar as dependências. O APK foi compilado com SDK 35, assinado com chave de teste e verificado com apksigner. A instalação em aparelho físico, o envio com app fechado, o servidor público e a publicação na Play Store ainda estão pendentes.
+Execute python -m unittest discover -s tests -v na raiz após instalar as dependências. O APK foi compilado com SDK 35, assinado com chave de teste e verificado com apksigner. Para hospedagem, backup, ativação da IA e notificações em aparelhos reais, consulte [o guia do piloto conectado](deploy/README.md). A entrega real pelo Firebase, o teste físico, o servidor público e a publicação na Play Store dependem de configuração externa.

@@ -83,21 +83,33 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> { if(web!=null) web.evaluateJavascript(script,null); });
             });
         }
-        @JavascriptInterface public void notifyReview(String id) {
+        @JavascriptInterface public void enableReviewPush(String binding) {
+            if (!binding.matches("[a-fA-F0-9-]{36}")) return;
             runOnUiThread(() -> {
-                try {
-                    IntentHolder.show(MainActivity.this, id);
-                } catch(SecurityException ignored) { }
+                if (!getSystemService(NotificationManager.class).areNotificationsEnabled()) {
+                    pushResult(binding, "", "Ative a permissão de notificações nas configurações do Android.");
+                    return;
+                }
+                if (com.google.firebase.FirebaseApp.getApps(MainActivity.this).isEmpty()) {
+                    pushResult(binding, "", "Esta compilação ainda não está vinculada ao Firebase.");
+                    return;
+                }
+                com.google.firebase.messaging.FirebaseMessaging.getInstance().getToken()
+                    .addOnCompleteListener(task -> pushResult(binding,task.isSuccessful()?task.getResult():"",
+                                           task.isSuccessful()?"":"Falha ao registrar o aparelho. Tente novamente."));
             });
         }
-    }
-    static class IntentHolder {
-        static void show(Activity a,String id) {
-            android.content.Intent i=new android.content.Intent(a,MainActivity.class);
-            PendingIntent intent=PendingIntent.getActivity(a,0,i,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
-            Notification n=new Notification.Builder(a,"reviews").setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("TrackFit • revisão disponível").setContentText("Abra o aplicativo para revisar a nova ficha.").setContentIntent(intent).setAutoCancel(true).build();
-            a.getSystemService(NotificationManager.class).notify(id.hashCode(),n);
+        @JavascriptInterface public void bindPush(String binding) {
+            if (binding.isEmpty() || binding.matches("[a-fA-F0-9-]{36}"))
+                getSharedPreferences("push",MODE_PRIVATE).edit().putString("binding",binding).commit();
         }
+        @JavascriptInterface public void notifyReview(String id) {
+            runOnUiThread(() -> ReviewMessages.show(MainActivity.this,id));
+        }
+    }
+    private void pushResult(String binding,String value,String error) {
+        if (web!=null) web.evaluateJavascript("window.receivePush("+JSONObject.quote(binding)+","+
+            JSONObject.quote(value)+","+JSONObject.quote(error)+")", null);
     }
     @Override protected void onDestroy() { if(web!=null) { web.removeJavascriptInterface("TrackFitNative"); web.destroy(); web=null; } executor.shutdownNow(); super.onDestroy(); }
 }

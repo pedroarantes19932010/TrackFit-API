@@ -3,7 +3,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const app=$('#app'); let token='',origin='',me=null,demo=false,poller=null,requestCount=0;
 const awaiting=new Map(), announced=new Set();
-let generation=null;
+let generation=null, pushBinding=null;
 const labels={pending:'Aguardando avaliação',released:'Revisão pendente',reviewed:'Revisada pelo treinador',suspended:'Suspensa'};
 const uuid=()=>typeof crypto.randomUUID==='function' ? crypto.randomUUID() : Array.from(crypto.getRandomValues(new Uint8Array(16)), b=>b.toString(16).padStart(2,'0')).join('');
 const copy=value=>JSON.parse(JSON.stringify(value));
@@ -22,9 +22,10 @@ const goals=[['condicionamento','Condicionamento'],['hipertrofia','Hipertrofia']
 const levels=[['iniciante','Iniciante'],['intermediario','Intermediário']];
 const equipment=[['academia','Academia'],['casa','Casa']];
 function login(){
- clearInterval(poller);me=null;token='';demo=false;announced.clear();generation=null;$('#nav').hidden=true;$('#logout').hidden=true;
+ if(me && !demo) window.TrackFitNative?.bindPush?.('');
+ pushBinding=null;clearInterval(poller);me=null;token='';demo=false;announced.clear();generation=null;$('#nav').hidden=true;$('#logout').hidden=true;
  page('<h1>Seu treino no TrackFit</h1><div class="hero"><h2>Experimente como aluno e treinador</h2><p>Abra uma ficha fictícia, registre uma série e revise o treino.</p><button id="demo" class="secondary">Conhecer a demonstração</button></div><h2>Entrar no piloto</h2>'+input('server','Endereço do servidor','http://10.0.2.2:8000','url')+input('code','Código privado de acesso','','password')+'<button id="enter">Entrar</button><p class="muted"><small>Peça o código ao seu treinador. Nesta fase, use somente dados de teste.</small></p>');
- button('enter',async()=>{origin=$('#server').value.trim().replace(/\/+$/,'');token=$('#code').value.trim();me=await api('GET','/me');shell();await home();});
+ button('enter',async()=>{origin=$('#server').value.trim().replace(/\/+$/,'');token=$('#code').value.trim();me=await api('GET','/me');window.TrackFitNative?.bindPush?.('');shell();await home();});
  button('demo',async()=>{demo=true;resetDemo();me={name:'Pedro • demonstração',role:'trainer',provider:'demo'};shell();await home();});
 }
 function shell(){
@@ -37,8 +38,8 @@ function shell(){
 async function pollNotifications(){if(!me||me.role!=='trainer')return;const rows=await api('GET','/notifications');for(const n of rows){if(!n.seen&&!announced.has(n.id)){announced.add(n.id);if(!demo)window.TrackFitNative?.notifyReview(n.id);}}}
 async function home(){
  const plans=await api('GET','/plans'), trainer=me.role==='trainer';
- page(`<span class="eyebrow">${trainer?'ÁREA DO TREINADOR':'ÁREA DO ALUNO'}</span><h1>Olá, ${esc(me.name.split(' ')[0])}.</h1><p class="muted">${trainer?'As fichas chegam completas. Você revisa e acompanha por aqui.':'Sua ficha e seu histórico, no mesmo lugar.'}</p>${me.provider==='demo'&&!demo?'<div class="notice">Servidor em modo demonstração: seleção por regras, sem IA real.</div>':''}<div class="hero"><small>${trainer?'PARA ACOMPANHAR':'SEU ESPAÇO'}</small><h2>${trainer?plans.filter(p=>['pending','released'].includes(p.state)).length+' fichas para revisar':'Vamos treinar?'}</h2><p>${trainer?'Revisões e avaliações individuais pendentes.':'Preencha a avaliação para receber sua ficha.'}</p></div>${demo?'<button id="switchDemo" class="secondary">Ver como '+(trainer?'aluno':'treinador')+'</button>':''}<button id="primary">${trainer?'Cadastrar aluno':'Preencher avaliação'}</button><h2>${trainer?'Fichas dos alunos':'Minhas fichas'}</h2><div id="plans"></div>`);
- button('primary',trainer?newStudent:assessment);button('switchDemo',async()=>{me.role=trainer?'student':'trainer';me.name=trainer?'Ana Demo':'Pedro Demo';shell();await home();});
+ page(`<span class="eyebrow">${trainer?'ÁREA DO TREINADOR':'ÁREA DO ALUNO'}</span><h1>Olá, ${esc(me.name.split(' ')[0])}.</h1><p class="muted">${trainer?'As fichas chegam completas. Você revisa e acompanha por aqui.':'Sua ficha e seu histórico, no mesmo lugar.'}</p>${me.provider==='demo'&&!demo?'<div class="notice">Servidor em modo demonstração: seleção por regras, sem IA real.</div>':''}<div class="hero"><small>${trainer?'PARA ACOMPANHAR':'SEU ESPAÇO'}</small><h2>${trainer?plans.filter(p=>['pending','released'].includes(p.state)).length+' fichas para revisar':'Vamos treinar?'}</h2><p>${trainer?'Revisões e avaliações individuais pendentes.':'Preencha a avaliação para receber sua ficha.'}</p></div>${demo?'<button id="switchDemo" class="secondary">Ver como '+(trainer?'aluno':'treinador')+'</button>':''}<button id="primary">${trainer?'Cadastrar aluno':'Preencher avaliação'}</button><h2>${trainer?'Fichas dos alunos':'Minhas fichas'}</h2><div id="plans"></div><button id="timeline" class="secondary">Consultar histórico completo</button>`);
+ button('timeline',()=>timeline(0));button('primary',trainer?newStudent:assessment);button('switchDemo',async()=>{me.role=trainer?'student':'trainer';me.name=trainer?'Ana Demo':'Pedro Demo';shell();await home();});
  if(!plans.length)$('#plans').innerHTML='<div class="empty">Nenhuma ficha ainda. '+(trainer?'Comece cadastrando um aluno e criando seus modelos.':'Sua primeira ficha aparecerá aqui.')+'</div>';
  for(const p of plans){const el=document.createElement('div');el.className='card';el.innerHTML=`<span class="badge ${p.state}">${esc(labels[p.state])}</span><h2>${esc(p.student_name)}</h2><p>${p.days.length?p.days.length+' dias • versão '+p.version:'Avaliação aguardando atendimento'}</p><button>Abrir ficha</button>`;el.querySelector('button').onclick=()=>detail(p.id).catch(e=>toast(e.message));$('#plans').append(el);}
 }
@@ -68,7 +69,49 @@ function readDays(){return [...document.querySelectorAll('.day-edit')].map((d,i)
 function editPlan(p){page('<span class="eyebrow">REVISÃO PROFISSIONAL</span><h1>Ajustar ficha.</h1><p>A nova versão será usada nos próximos treinos. A sessão em andamento mantém sua ficha original.</p><div id="editor"></div><label for="note">O que você avaliou e alterou?</label><textarea id="note"></textarea><button id="save">Salvar e liberar versão revisada</button>');dayEditor(p.days.length?p.days:Array.from({length:p.profile.days},(_,i)=>({title:'Treino '+(i+1),exercises:[]})));button('save',async()=>{await api('POST',`/plans/${p.id}/review`,{action:'edit',expected_version:p.version,note:$('#note').value,days:readDays()});await detail(p.id);});}
 async function templates(){const rows=await api('GET','/templates');page('<span class="eyebrow">SUA BASE PROFISSIONAL</span><h1>Modelos de treino.</h1><p>Somente modelos aprovados podem ser selecionados automaticamente. Aprovar um modelo não aprova todas as fichas já geradas.</p><button id="newTemplate">Criar modelo</button><div id="templates"></div>');button('newTemplate',newTemplate);for(const t of rows){const el=document.createElement('div');el.className='card';el.innerHTML=`<span class="badge">${t.approved?'Aprovado para seleção':'Rascunho'}</span><h2>${esc(t.data.name)}</h2><p>${esc(t.data.goal)} • ${t.data.days.length} dias • ${t.data.minutes} min<br>${esc(t.data.experience)} • ${esc(t.data.equipment)} • ${t.data.min_age}–${t.data.max_age} anos</p><details><summary>Ver ficha completa</summary>${daysHtml(t.data.days)}</details><button>${t.approved?'Retirar da seleção automática':'Aprovar este modelo'}</button>`;el.querySelector('button').onclick=async()=>{try{await api('POST',`/templates/${t.id}/approval`,{approved:!t.approved});await templates();}catch(e){toast(e.message);}};$('#templates').append(el);}if(!rows.length)$('#templates').innerHTML='<p class="empty">Nenhum modelo. A liberação automática está desativada até você criar e aprovar um.</p>';}
 function newTemplate(){page('<span class="eyebrow">NOVO MODELO</span><h1>Sua ficha de referência.</h1>'+input('modelName','Nome do modelo')+select('goal','Objetivo',goals)+select('experience','Experiência',levels)+select('equipment','Equipamentos',equipment)+input('minutes','Duração estimada por treino (minutos)',40,'number')+'<div class="row"><div>'+input('minAge','Idade mínima',18,'number')+'</div><div>'+input('maxAge','Idade máxima',60,'number')+'</div></div>'+input('dayCount','Dias por semana',1,'number')+'<button id="makeDays" class="secondary">Preparar os dias</button><div id="editor"></div><button id="save">Salvar como rascunho</button>');dayEditor([{title:'Treino 1',exercises:[]}]);button('makeDays',()=>{const count=Number($('#dayCount').value);if(count<1||count>6||!Number.isInteger(count))throw Error('Escolha de 1 a 6 dias.');const current=readDays();if(count<current.length)throw Error('Para reduzir dias, abra um novo modelo. Isso evita apagar seu trabalho.');dayEditor(Array.from({length:count},(_,i)=>current[i]||{title:'Treino '+(i+1),exercises:[]}));});button('save',async()=>{await api('POST','/templates',{name:$('#modelName').value,goal:$('#goal').value,experience:$('#experience').value,equipment:$('#equipment').value,minutes:Number($('#minutes').value),min_age:Number($('#minAge').value),max_age:Number($('#maxAge').value),days:readDays()});await templates();});}
-async function notifications(){const rows=await api('GET','/notifications');page('<span class="eyebrow">ACOMPANHAMENTO</span><h1>Seus avisos.</h1><p class="muted">As fichas chegam completas para revisão.</p><div class="notice">Neste piloto, os avisos são consultados enquanto o app está aberto. Notificações com o aplicativo fechado ainda não estão ativadas.</div><div id="alerts"></div>');for(const n of rows){const el=document.createElement('div');el.className='card';el.innerHTML='<span class="badge">'+(n.seen?'Lido':'Novo')+'</span><p>'+esc(n.message)+'</p><button>Ver ficha</button>';el.querySelector('button').onclick=async()=>{try{await api('POST',`/notifications/${n.id}/read`);await detail(n.plan);}catch(e){toast(e.message);}};$('#alerts').append(el);}if(!rows.length)$('#alerts').innerHTML='<p class="empty">Nenhum aviso por enquanto.</p>';}
+async function timeline(pageNumber) {
+ const rows=await api('GET','/history/page/'+pageNumber);
+ page('<h1>Histórico completo</h1><p>Fichas e sessões em ordem de registro.</p><div id="records"></div><div id="paging"></div>');
+ for (const row of rows) {
+   const card=document.createElement('details'); card.className='card';
+   const title={plano:'Ficha do Android',ficha_v1:'Ficha da API anterior',sessao:'Treino registrado'}[row.kind];
+   const summary=document.createElement('summary');
+   summary.textContent=title+' • '+row.name+' • versão '+row.version;
+   card.append(summary);
+   const date=document.createElement('p');date.textContent=new Date(row.created*1000).toLocaleString('pt-BR');card.append(date);
+   const days=row.kind==='sessao'?[row.payload.day]:row.kind==='ficha_v1'?[{title:'Exercícios',exercises:row.payload}]:row.payload;
+   const content=document.createElement('div');content.innerHTML=daysHtml(days);card.append(content);
+   if(row.kind==='sessao' && row.payload.actual){
+     const actual=document.createElement('div');
+     for(const set of row.payload.actual.sets){
+       const line=document.createElement('p');
+       line.textContent=row.payload.day.exercises[set.exercise_index].name+' • série '+(set.set_index+1)+': '+set.weight_kg+' kg × '+set.reps;
+       actual.append(line);
+     }
+     card.append(actual);
+   }
+   $('#records').append(card);
+ }
+ if(!rows.length)$('#records').textContent='Nenhum registro nesta página.';
+ $('#paging').innerHTML=(pageNumber?'<button id="prev">Página anterior</button>':'')+(rows.length===30?'<button id="next">Próxima página</button>':'');
+ button('prev',()=>timeline(pageNumber-1));button('next',()=>timeline(pageNumber+1));
+}
+function enablePush(){
+ if(!window.TrackFitNative?.enableReviewPush)throw Error('Use o aplicativo Android com suporte a notificações.');
+ pushBinding=uuid();
+ window.TrackFitNative.enableReviewPush(pushBinding);
+}
+window.receivePush=async(binding,deviceToken,error)=>{
+ if(binding!==pushBinding||!me||me.role!=='trainer'||demo)return;
+ if(error){toast(error);return;}
+ try{
+   await api('POST','/push/devices',{binding,token:deviceToken});
+   if(binding!==pushBinding)return;
+   window.TrackFitNative.bindPush(binding);
+   toast('Avisos de novas fichas ativados neste aparelho.');
+ }catch(e){toast(e.message);}
+};
+async function notifications(){const rows=await api('GET','/notifications');page('<span class="eyebrow">ACOMPANHAMENTO</span><h1>Seus avisos.</h1><p class="muted">As fichas chegam completas para revisão.</p><div id="pushAction"></div><div id="alerts"></div>');if(!demo){$('#pushAction').innerHTML='<button id="push">Ativar avisos com o app fechado</button>';button('push',enablePush);}for(const n of rows){const el=document.createElement('div');el.className='card';el.innerHTML='<span class="badge">'+(n.seen?'Lido':'Novo')+'</span><p>'+esc(n.message)+'</p><button>Ver ficha</button>';el.querySelector('button').onclick=async()=>{try{await api('POST',`/notifications/${n.id}/read`);await detail(n.plan);}catch(e){toast(e.message);}};$('#alerts').append(el);}if(!rows.length)$('#alerts').innerHTML='<p class="empty">Nenhum aviso por enquanto.</p>';}
 async function history(){const rows=await api('GET','/sessions');page('<span class="eyebrow">SEU REGISTRO</span><h1>Histórico de treinos.</h1><div id="sessions"></div>');for(const s of rows){const el=document.createElement('div');el.className='card';el.innerHTML='<span class="badge">'+esc({active:'Em andamento',finished:'Concluído',suspended:'Suspenso'}[s.state])+'</span><h2>'+esc(s.snapshot.title)+'</h2><p>Ficha versão '+s.version+'</p><button>Abrir registro</button>';el.querySelector('button').onclick=()=>sessionView(s);$('#sessions').append(el);}if(!rows.length)$('#sessions').innerHTML='<p class="empty">Os treinos iniciados aparecerão aqui.</p>';}
 function sessionView(s){
  page('<span class="eyebrow">TREINO • VERSÃO '+s.version+'</span><h1>'+esc(s.snapshot.title)+'</h1><div class="notice">Registre somente o que realizou. A carga não é sugerida automaticamente. Zero significa ausência de carga externa. Campos vazios não são registrados.</div><div id="sets"></div>'+ (s.state==='active'?'<label for="note">Observações</label><textarea id="note"></textarea><button id="finish">Salvar treino realizado</button>':'<p>Este registro está '+esc(s.state==='finished'?'concluído':'suspenso')+'.</p>'));
@@ -81,6 +124,10 @@ const sampleDay=()=>({title:'Treino demonstrativo',exercises:[{name:'Exercício 
 function resetDemo(){demoTemplates=[{id:'sample-model',approved:true,data:{name:'Exemplo fictício • 1 dia',goal:'condicionamento',experience:'iniciante',equipment:'academia',minutes:30,min_age:18,max_age:65,days:[sampleDay()]}}];demoSessions=[];demoPlans=[{id:'demo-plan',student_name:'Ana Demo',version:1,state:'released',source:'demo',note:'Ficha fictícia para conhecer o aplicativo. Não executar.',profile:{age:30,goal:'condicionamento',experience:'iniciante',equipment:'academia',days:1,minutes:40,needs_review:false,limitations:'',consent:true},days:[sampleDay()]}];demoAlerts=[{id:'demo-alert',plan:'demo-plan',message:'Ficha completa de demonstração disponível.',seen:0}];}
 async function demoApi(method,path,b){
  const parts=path.split('/').filter(Boolean),id=parts[1];
+ if(path.startsWith('/history/page/')) {
+   const rows=demoSessions.map(s=>({kind:'sessao',name:'Ana Demo',version:s.version,created:Date.now()/1000,payload:{day:s.snapshot,actual:s.actual,state:s.state}}));
+   return rows.concat(demoPlans.map(p=>({kind:'plano',name:p.student_name,version:p.version,created:Date.now()/1000,payload:p.days}))).slice(Number(parts[2])*30,Number(parts[2])*30+30);
+ }
  if(path==='/plans'&&method==='GET')return copy(demoPlans);
  if(path==='/plans'&&method==='POST'){
    const profile=b.profile;

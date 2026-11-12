@@ -24,3 +24,7 @@ data/
 *.sqlite3*
 *.jks
 *.keystore
+
+google-services.json
+*firebase-adminsdk*.json
+secrets/
