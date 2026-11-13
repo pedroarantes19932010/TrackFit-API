@@ -11,7 +11,7 @@ class CatalogTests(unittest.TestCase):
     def test_list_and_search(self):
         response = self.client.get("/v1/exercises")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.json()), 6)
+        self.assertEqual(len(response.json()), 8)
         self.assertEqual(len(self.client.get("/v1/exercises?muscle_group=costas").json()), 1)
         self.assertEqual(self.client.get("/v1/exercises?search=Remada").json()[0]["exercise_id"], "seated_row")
 

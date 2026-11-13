@@ -7,12 +7,14 @@ android {
         applicationId 'br.com.trackfit.piloto'
         minSdk 26
         targetSdk 35
-        versionCode 9
-        versionName '0.7.0-piloto'
+        versionCode 10
+        versionName '0.8.0-piloto'
     }
     buildFeatures { buildConfig true }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
 
 // Firebase only starts when a trainer enables alerts and client settings are present.
-dependencies { implementation 'com.google.firebase:firebase-messaging:24.1.2' }
+dependencies {
+    implementation 'com.google.mlkit:text-recognition:16.0.1'
+    implementation 'com.google.firebase:firebase-messaging:24.1.2' }

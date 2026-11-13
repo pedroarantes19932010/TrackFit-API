@@ -18,6 +18,7 @@ from trackfit_api.catalog_routes import router as catalog_router
 from datetime import datetime
 from server.accounts import add_code_account, prepare_accounts
 from server.models import (Generate, Review, Template, TemplateApproval, NewStudent, Start, Finish)
+from server.equipment import adapt_equipment
 from server.provider import choose_template, ProviderError
 
 
@@ -176,8 +177,8 @@ def create_app(db_path=None, mode=None, chooser=None):
 
     @app.post("/plans", status_code=201)
     def generate(body: Generate, user=Depends(student)):
-        payload_hash = digest(packed(body.profile.model_dump()))
-        profile = body.profile.model_dump()
+        payload_hash = digest(packed(body.profile.model_dump(exclude_none=True)))
+        profile = body.profile.model_dump(exclude_none=True)
         # Reservation limits cost even for failures; no database lock during network calls.
         with db(True) as conn:
             existing = conn.execute("SELECT * FROM plans WHERE student=? AND request_id=?", (user["id"], body.request_id)).fetchone()
@@ -193,7 +194,9 @@ def create_app(db_path=None, mode=None, chooser=None):
             for row in conn.execute("SELECT * FROM templates WHERE trainer=? AND approved=1", (user["trainer"],)):
                 t = json.loads(row["data"])
                 if (all(t[k] == profile[k] for k in ("goal", "experience", "equipment")) and len(t["days"]) == profile["days"] and t["minutes"] <= profile["minutes"] and t["min_age"] <= profile["age"] <= t["max_age"]):
-                    candidates.append({"id": row["id"], "data": t})
+                    adapted = adapt_equipment(t, profile.get("inventory"))
+                    if adapted is not None:
+                        candidates.append({"id": row["id"], "data": adapted})
         blocked = profile["needs_review"] or bool(profile["limitations"].strip())
         chosen, days, state = None, [], "pending"
         note = "Avaliação individual necessária antes de liberar a ficha." if blocked else "Nenhum modelo aprovado compatível. Aguardando treinador."

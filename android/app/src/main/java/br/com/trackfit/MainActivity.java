@@ -48,7 +48,35 @@ public class MainActivity extends Activity {
         manager.createNotificationChannel(new NotificationChannel("reviews", "Fichas para revisar", NotificationManager.IMPORTANCE_DEFAULT));
         if (Build.VERSION.SDK_INT >= 33) requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},1);
     }
+    private String photoRequest;
+    private void photoResult(String request, String text) {
+        if(web != null) web.evaluateJavascript("window.equipmentPhotoResult("+JSONObject.quote(request)+","+JSONObject.quote(text)+")",null);
+    }
+    @Override protected void onActivityResult(int code,int result,android.content.Intent data) {
+        super.onActivityResult(code,result,data);
+        if(code!=42 || photoRequest==null)return;
+        final String request=photoRequest;
+        photoRequest=null;
+        if(result!=RESULT_OK || data==null || data.getData()==null){photoResult(request,"");return;}
+        try {
+            com.google.mlkit.vision.common.InputImage image=com.google.mlkit.vision.common.InputImage.fromFilePath(this,data.getData());
+            com.google.mlkit.vision.text.TextRecognizer reader=com.google.mlkit.vision.text.TextRecognition.getClient(
+                com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS);
+            reader.process(image).addOnSuccessListener(t->photoResult(request,t.getText().substring(0,Math.min(2000,t.getText().length()))))
+                .addOnFailureListener(e->photoResult(request,"")).addOnCompleteListener(t->reader.close());
+        } catch(Exception e){photoResult(request,"");}
+    }
     private class Bridge {
+        @JavascriptInterface public void selectEquipmentPhoto(String request) {
+            if(request==null || !request.matches("[a-fA-F0-9-]{36}"))return;
+            runOnUiThread(()->{
+                photoRequest=request;
+                android.content.Intent chooser=new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT)
+                    .addCategory(android.content.Intent.CATEGORY_OPENABLE).setType("image/*");
+                try {startActivityForResult(chooser,42);}
+                catch(android.content.ActivityNotFoundException e){photoRequest=null;photoResult(request,"");}
+            });
+        }
         @JavascriptInterface public String lastServer() {
             return getSharedPreferences("connection", MODE_PRIVATE).getString("origin", "");
         }

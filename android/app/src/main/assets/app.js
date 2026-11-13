@@ -128,8 +128,34 @@ async function weekly(offset=0){
 function newStudent(){page('<span class="eyebrow">NOVO ALUNO</span><h1>Vamos começar.</h1><p>O código dá acesso somente aos dados deste aluno. Compartilhe em privado.</p>'+input('name','Nome do aluno')+'<button id="create">Criar acesso</button><div id="result"></div>');button('create',async()=>{const name=$('#name').value.trim();if(name.length<2)throw Error('Informe o nome.');const r=await api('POST','/students',{name});$('#result').innerHTML='<div class="card"><h2>Acesso criado</h2><p>Guarde este código: ele é exibido uma única vez.</p><div class="code">'+esc(r.access_code)+'</div><p><small>Válido por 30 dias.</small></p></div>';});}
 function assessment(){
  page('<span class="eyebrow">AVALIAÇÃO INICIAL</span><h1>Conte sobre você.</h1><p class="muted">Seu treinador usa estas respostas para definir uma ficha compatível.</p>'+input('age','Idade','','number')+select('goal','Objetivo',goals)+select('experience','Experiência',levels)+select('equipment','Onde vai treinar?',equipment)+'<div class="row"><div>'+input('days','Dias por semana',1,'number')+'</div><div>'+input('minutes','Minutos por treino',40,'number')+'</div></div>'+select('review','Você tem dor, lesão, condição de saúde, está gestante ou tem alguma dúvida sobre treinar?',[['','Selecione uma resposta'],['yes','Sim / tenho dúvida'],['no','Não']])+'<label for="limits">Restrições ou observações</label><textarea id="limits" placeholder="Se houver algo que seu treinador precisa saber"></textarea><div class="notice">Restrições e dúvidas serão encaminhadas para avaliação individual antes da liberação.</div><label><input id="consent" type="checkbox">Autorizo o uso dessas informações para montar e acompanhar minha ficha neste piloto.</label><button id="generate">Solicitar ficha completa</button>');
- button('generate',async()=>{if(!$('#review').value||!$('#consent').checked)throw Error('Responda à pergunta de saúde e marque a autorização.');const profile={age:Number($('#age').value),goal:$('#goal').value,experience:$('#experience').value,equipment:$('#equipment').value,days:Number($('#days').value),minutes:Number($('#minutes').value),needs_review:$('#review').value==='yes',limitations:$('#limits').value.trim(),consent:true};const serialized=JSON.stringify(profile);if(!generation||generation.serialized!==serialized)generation={serialized,id:uuid()};const p=await api('POST','/plans',{request_id:generation.id,profile});generation=null;await detail(p.id);});
+ if(!demo){
+   const items=[...new Set(catalog.map(e=>e.equipment))].filter(e=>e!=='peso corporal');
+   $('#generate').insertAdjacentHTML('beforebegin','<fieldset id="inventory"><legend>Quais equipamentos estão disponíveis?</legend><p>Marque apenas os que você confirma. Sem aparelhos marcados, a seleção considera apenas peso corporal.</p>'+items.map(name=>'<label><input type="checkbox" class="equipment-item" value="'+esc(name)+'">'+esc(name)+'</label>').join('')+'<button id="photo" type="button" class="secondary">Ler foto da placa do aparelho</button><p id="photoResult" role="status"></p></fieldset>');
+   button('photo',()=>{
+     const field=$('#inventory');field.dataset.request=uuid();
+     if(!window.TrackFitNative?.selectEquipmentPhoto)throw Error('Selecione os aparelhos manualmente neste dispositivo.');
+     TrackFitNative.selectEquipmentPhoto(field.dataset.request);
+   });
+ }
+ button('generate',async()=>{if(!$('#review').value||!$('#consent').checked)throw Error('Responda à pergunta de saúde e marque a autorização.');const profile={age:Number($('#age').value),goal:$('#goal').value,experience:$('#experience').value,equipment:$('#equipment').value,days:Number($('#days').value),minutes:Number($('#minutes').value),needs_review:$('#review').value==='yes',limitations:$('#limits').value.trim(),consent:true};if(!demo)profile.inventory=[...document.querySelectorAll('.equipment-item:checked')].map(el=>el.value);const serialized=JSON.stringify(profile);if(!generation||generation.serialized!==serialized)generation={serialized,id:uuid()};const p=await api('POST','/plans',{request_id:generation.id,profile});generation=null;await detail(p.id);});
 }
+window.equipmentPhotoResult=(request,text)=>{
+ const field=$('#inventory');
+ if(!field||field.dataset.request!==request)return;
+ delete field.dataset.request;
+ const normalize=s=>s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+ const words=' '+normalize(text)+' ';
+ const aliases={'Hack machine':['hack squat','hack machine'],'Leg press 45°':['leg press 45','45 degree leg press'],
+   'Mesa flexora':['mesa flexora','lying leg curl'],'Remada sentada (máquina)':['remada sentada','seated row'],
+   'Supino (máquina)':['chest press','supino maquina']};
+ const result=$('#photoResult');result.replaceChildren();
+ for(const item of field.querySelectorAll('.equipment-item')){
+   if(!(aliases[item.value]||[item.value]).some(alias=>words.includes(' '+normalize(alias)+' ')))continue;
+   const confirm=document.createElement('button');confirm.type='button';confirm.textContent='Confirmar '+item.value;
+   confirm.onclick=()=>{item.checked=true;confirm.remove();};result.append(confirm);
+ }
+ if(!result.children.length)result.textContent='Aparelho não identificado. Confira a placa ou marque o equipamento manualmente.';
+};
 function catalogHelp(id){
  const entry=catalog.find(item=>item.exercise_id===id);
  if(!entry)return '';
@@ -180,14 +206,14 @@ async function videoEditor(selected){
    await videoEditor(id);
  });
 }
-function daysHtml(days){return days.map(d=>`<div class="card"><h2>${esc(d.title)}</h2>${d.exercises.map(e=>`<div class="exercise"><strong>${esc(e.name)}</strong><span>${e.sets} séries × ${e.reps} repetições • ${e.rest_seconds}s descanso</span><small>${esc(e.instructions)}</small>${catalogHelp(e.exercise_id)}</div>`).join('')}</div>`).join('');}
+function daysHtml(days){return days.map(d=>`<div class="card"><h2>${esc(d.title)}</h2>${d.exercises.map(e=>`<div class="exercise"><strong>${esc(e.name)}</strong><span>${e.sets} séries × ${e.reps} repetições • ${e.rest_seconds}s descanso</span><small>${esc(e.instructions)}</small>${catalogHelp(e.exercise_id)}${e.alternative?'<p>Alternativa aprovada no modelo: '+esc(e.alternative.name)+' • '+e.alternative.sets+' × '+e.alternative.reps+' • '+e.alternative.rest_seconds+' s</p><small>'+esc(e.alternative.instructions)+'</small>':''}</div>`).join('')}</div>`).join('');}
 async function detail(id){
  const account=me;
  const [p, currentCatalog]=await Promise.all([api('GET','/plans/'+id),demo?catalog:api('GET','/catalog')]);
  if(me!==account)return;
  catalog=currentCatalog;const trainer=me.role==='trainer';
  if(!trainer&&!demo&&p.state==='suspended'){const saved=readDownload();if(saved?.session.plan===id)clearDownload(saved.session.id);}
- page(`<span class="badge ${p.state}">${esc(labels[p.state])}</span><h1>${esc(p.student_name)}</h1><p class="muted">Ficha • versão ${p.version}</p><div class="notice">${esc(p.note)}</div>${trainer?`<details><summary>Ver avaliação</summary><div class="card">${Object.entries({Idade:p.profile.age,Objetivo:p.profile.goal,Experiência:p.profile.experience,Dias:p.profile.days,Minutos:p.profile.minutes,Local:p.profile.equipment,'Requer avaliação':p.profile.needs_review?'Sim':'Não',Observações:p.profile.limitations||'Nenhuma'}).map(([k,v])=>`<div class="summary"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join('')}</div></details>`:''}${daysHtml(p.days)}${!p.days.length?'<div class="empty">Seu treinador precisa concluir a avaliação antes de liberar os exercícios.</div>':''}<div id="actions"></div><div id="supportLink"></div>`);
+ page(`<span class="badge ${p.state}">${esc(labels[p.state])}</span><h1>${esc(p.student_name)}</h1><p class="muted">Ficha • versão ${p.version}</p><div class="notice">${esc(p.note)}</div>${trainer?`<details><summary>Ver avaliação</summary><div class="card">${Object.entries({Idade:p.profile.age,Objetivo:p.profile.goal,Experiência:p.profile.experience,Dias:p.profile.days,Minutos:p.profile.minutes,Local:p.profile.equipment,'Requer avaliação':p.profile.needs_review?'Sim':'Não','Aparelhos confirmados':p.profile.inventory?.join(', ')||(p.profile.inventory?'Somente peso corporal':'Não informado'),Observações:p.profile.limitations||'Nenhuma'}).map(([k,v])=>`<div class="summary"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join('')}</div></details>`:''}${daysHtml(p.days)}${!p.days.length?'<div class="empty">Seu treinador precisa concluir a avaliação antes de liberar os exercícios.</div>':''}<div id="actions"></div><div id="supportLink"></div>`);
  if(!demo){$('#supportLink').innerHTML='<button class="secondary" id="openSupport">Conversa sobre esta ficha</button>';button('openSupport',()=>conversation(id));}
  if(trainer){$('#actions').innerHTML='<button id="approve">Marcar como revisada</button><button id="edit" class="secondary">Editar ficha completa</button><button id="suspend" class="danger">Suspender ficha</button>';button('approve',()=>reviewNote(p,'approve'));button('edit',()=>editPlan(p));button('suspend',()=>reviewNote(p,'suspend'));}
  else if(['released','reviewed'].includes(p.state)){
@@ -237,7 +263,7 @@ function dayEditor(days){
  const list=box.querySelector('.exercise-fields');for(const ex of d.exercises)addExercise(list,ex);
  box.querySelector('.add-exercise').onclick=()=>addExercise(list);$('#editor').append(box);});
 }
-function addExercise(parent,e={name:'',sets:2,reps:10,rest_seconds:60,instructions:''}){
+function addExercise(parent,e={name:'',sets:2,reps:10,rest_seconds:60,instructions:''},allowAlternative=true){
  const row=document.createElement('div');row.className='exercise editor-row';row.innerHTML='<label>Nome do exercício</label><input class="ex-name" value="'+esc(e.name)+'"><div class="row"><div><label>Séries</label><input class="ex-sets" type="number" value="'+e.sets+'"></div><div><label>Repetições</label><input class="ex-reps" type="number" value="'+e.reps+'"></div><div><label>Descanso (s)</label><input class="ex-rest" type="number" value="'+e.rest_seconds+'"></div></div><label>Orientações de execução e carga</label><textarea class="ex-instructions">'+esc(e.instructions)+'</textarea><button class="ghost remove">Remover</button>';row.dataset.catalogId=e.exercise_id||'';
  if(catalog.length){
    const label=document.createElement('label');label.textContent='Referência do catálogo';
@@ -252,9 +278,27 @@ function addExercise(parent,e={name:'',sets:2,reps:10,rest_seconds:60,instructio
    row.querySelector('.ex-name').oninput=()=>{picker.value='';row.dataset.catalogId='';};
    label.append(picker);row.prepend(label);
  }
+ if(allowAlternative && !demo){
+   const details=document.createElement('details');details.innerHTML='<summary>Alternativa se faltar aparelho</summary><div class="alt-fields"></div><button type="button" class="secondary">Configurar alternativa</button>';
+   const fields=details.querySelector('.alt-fields');
+   details.lastElementChild.onclick=()=>{if(!fields.firstElementChild)addExercise(fields,undefined,false);};
+   if(e.alternative)addExercise(fields,e.alternative,false);
+   row.append(details);
+ }
  row.querySelector('.remove').onclick=()=>row.remove();parent.append(row);
 }
-function readDays(){return [...document.querySelectorAll('.day-edit')].map((d,i)=>({title:$('#title'+i).value,exercises:[...d.querySelectorAll('.editor-row')].map(e=>({...e.dataset.catalogId?{exercise_id:e.dataset.catalogId}:{},name:e.querySelector('.ex-name').value,sets:Number(e.querySelector('.ex-sets').value),reps:Number(e.querySelector('.ex-reps').value),rest_seconds:Number(e.querySelector('.ex-rest').value),instructions:e.querySelector('.ex-instructions').value}))}));}
+function readExercise(row){
+ const value=selector=>row.querySelector(selector).value;
+ const exercise={name:value('.ex-name'),sets:Number(value('.ex-sets')),reps:Number(value('.ex-reps')),rest_seconds:Number(value('.ex-rest')),instructions:value('.ex-instructions')};
+ if(row.dataset.catalogId)exercise.exercise_id=row.dataset.catalogId;
+ const alt=row.querySelector('.alt-fields > .editor-row');
+ if(alt){
+   if(!alt.dataset.catalogId)throw Error('Escolha uma referência do catálogo para a alternativa.');
+   exercise.alternative=readExercise(alt);
+ }
+ return exercise;
+}
+function readDays(){return [...document.querySelectorAll('.day-edit')].map((day,i)=>({title:$('#title'+i).value,exercises:[...day.querySelectorAll('.exercise-fields > .editor-row')].map(readExercise)}));}
 function editPlan(p){page('<span class="eyebrow">REVISÃO PROFISSIONAL</span><h1>Ajustar ficha.</h1><p>A nova versão será usada nos próximos treinos. A sessão em andamento mantém sua ficha original.</p><div id="editor"></div><label for="note">O que você avaliou e alterou?</label><textarea id="note"></textarea><button id="save">Salvar e liberar versão revisada</button>');dayEditor(p.days.length?p.days:Array.from({length:p.profile.days},(_,i)=>({title:'Treino '+(i+1),exercises:[]})));button('save',async()=>{await api('POST',`/plans/${p.id}/review`,{action:'edit',expected_version:p.version,note:$('#note').value,days:readDays()});await detail(p.id);});}
 async function templates(){const rows=await api('GET','/templates');page('<span class="eyebrow">SUA BASE PROFISSIONAL</span><h1>Modelos de treino.</h1><p>Somente modelos aprovados podem ser selecionados automaticamente. Aprovar um modelo não aprova todas as fichas já geradas.</p><button id="newTemplate">Criar modelo</button><div id="templates"></div>');button('newTemplate',newTemplate);for(const t of rows){const el=document.createElement('div');el.className='card';el.innerHTML=`<span class="badge">${t.approved?'Aprovado para seleção':'Rascunho'}</span><h2>${esc(t.data.name)}</h2><p>${esc(t.data.goal)} • ${t.data.days.length} dias • ${t.data.minutes} min<br>${esc(t.data.experience)} • ${esc(t.data.equipment)} • ${t.data.min_age}–${t.data.max_age} anos</p><details><summary>Ver ficha completa</summary>${daysHtml(t.data.days)}</details><button>${t.approved?'Retirar da seleção automática':'Aprovar este modelo'}</button>`;el.lastElementChild.onclick=async()=>{try{await api('POST',`/templates/${t.id}/approval`,{approved:!t.approved});await templates();}catch(e){toast(e.message);}};$('#templates').append(el);}if(!rows.length)$('#templates').innerHTML='<p class="empty">Nenhum modelo. A liberação automática está desativada até você criar e aprovar um.</p>';}
 function newTemplate(){page('<span class="eyebrow">NOVO MODELO</span><h1>Sua ficha de referência.</h1>'+input('modelName','Nome do modelo')+select('goal','Objetivo',goals)+select('experience','Experiência',levels)+select('equipment','Equipamentos',equipment)+input('minutes','Duração estimada por treino (minutos)',40,'number')+'<div class="row"><div>'+input('minAge','Idade mínima',18,'number')+'</div><div>'+input('maxAge','Idade máxima',60,'number')+'</div></div>'+input('dayCount','Dias por semana',1,'number')+'<button id="makeDays" class="secondary">Preparar os dias</button><div id="editor"></div><button id="save">Salvar como rascunho</button>');dayEditor([{title:'Treino 1',exercises:[]}]);button('makeDays',()=>{const count=Number($('#dayCount').value);if(count<1||count>6||!Number.isInteger(count))throw Error('Escolha de 1 a 6 dias.');const current=readDays();if(count<current.length)throw Error('Para reduzir dias, abra um novo modelo. Isso evita apagar seu trabalho.');dayEditor(Array.from({length:count},(_,i)=>current[i]||{title:'Treino '+(i+1),exercises:[]}));});button('save',async()=>{await api('POST','/templates',{name:$('#modelName').value,goal:$('#goal').value,experience:$('#experience').value,equipment:$('#equipment').value,minutes:Number($('#minutes').value),min_age:Number($('#minAge').value),max_age:Number($('#maxAge').value),days:readDays()});await templates();});}

@@ -84,6 +84,15 @@ async function connected(page) {
   await page.locator('#age').fill('30');
   await page.locator('#review').selectOption('no');
   await page.locator('#consent').check();
+  await page.evaluate(()=>{
+    const inventory=document.querySelector('#inventory');
+    inventory.dataset.request='test-photo';
+    window.equipmentPhotoResult('test-photo','SEATED ROW');
+  });
+  const rowEquipment=page.getByRole('checkbox',{name:'Remada sentada (máquina)'});
+  assert.equal(await rowEquipment.isChecked(),false);
+  await page.getByRole('button',{name:'Confirmar Remada sentada (máquina)'}).click();
+  assert.equal(await rowEquipment.isChecked(),true);
   await page.locator('#generate').click();
   await page.getByText('Consultar catálogo',{exact:true}).click();
   await page.getByRole('button',{name:/Canal fictício/}).click();

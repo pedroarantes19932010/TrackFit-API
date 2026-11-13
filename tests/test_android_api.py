@@ -96,6 +96,19 @@ class ApiTests(unittest.TestCase):
         self.client.post(path,headers=self.t,json=data|{'scheduled':False})
         self.assertFalse(week(self.s)['students'][0]['appointments'])
 
+    def test_equipment_substitutions_and_flags(self):
+        primary=DAY['exercises'][0]|{'name':'Hack','exercise_id':'hack_squat'}
+        alt=primary|{'name':'Leg press','exercise_id':'leg_press_45','sets':1,'reps':7,'rest_seconds':90,'instructions':'Alternativa do treinador'}
+        day=DAY|{'exercises':[primary|{'alternative':alt}]}
+        r=self.client.post('/templates',headers=self.t,json=TEMPLATE|{'days':[day]})
+        self.client.post('/templates/'+r.json()['id']+'/approval',headers=self.t,json={'approved':True})
+        self.assertEqual(self.generate(inventory=['Hack machine','Leg press 45°']).json()['days'][0]['exercises'],[primary])
+        self.assertEqual(self.generate(inventory=['Leg press 45°']).json()['days'][0]['exercises'],[alt])
+        for inventory in ([],['Mesa flexora']):
+            self.assertEqual(self.generate(inventory=inventory).json()['state'],'pending')
+        self.assertEqual(self.generate(inventory=['Leg press 45°'],needs_review=True).json()['days'],[])
+        self.assertEqual(self.generate(inventory=['aparelho desconhecido']).status_code,422)
+
     def test_idempotent_plan_and_notification(self):
         self.template(); body={'request_id':str(uuid4()),'profile':PROFILE}
         a=self.client.post('/plans',headers=self.s,json=body)

@@ -16,7 +16,18 @@ class Profile(Strict):
     limitations: str = Field(max_length=1000)
     consent: Literal[True]
 
-class Exercise(Strict):
+    inventory: list[str] | None = Field(default=None,max_length=60)
+
+    @field_validator("inventory")
+    @classmethod
+    def known_equipment(cls, value):
+        from trackfit_api.catalog_routes import CATALOG
+        if value is not None and set(value)-{e.equipment for e in CATALOG}:
+            raise ValueError("Equipamento desconhecido.")
+        return sorted(set(value)) if value is not None else None
+
+
+class Prescription(Strict):
     exercise_id: str | None = None
 
     @field_validator("exercise_id")
@@ -32,6 +43,10 @@ class Exercise(Strict):
     reps: int = Field(ge=1, le=30)
     rest_seconds: int = Field(ge=15, le=300)
     instructions: str = Field(min_length=1, max_length=500)
+
+class Exercise(Prescription):
+    alternative: Prescription | None = None
+
 
 class Day(Strict):
     title: str = Field(min_length=1, max_length=80)
