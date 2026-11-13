@@ -1,0 +1,30 @@
+__pycache__/
+*.py[cod]
+.venv/
+# Registros locais: não enviar dados de alunos ao GitHub.
+historico_treinos.json
+historico_treinos.json.bak
+historico_treinos.json.lock
+historico_treinos.json.*.tmp
+historico_treinos.json.bak.*.tmp
+# Banco de dados local do protótipo
+*.sqlite
+*.sqlite3
+*.db
+*.sqlite-wal
+*.sqlite-shm
+.env
+
+# Piloto Android
+.gradle/
+.idea/
+local.properties
+**/build/
+data/
+*.sqlite3*
+*.jks
+*.keystore
+
+google-services.json
+*firebase-adminsdk*.json
+secrets/

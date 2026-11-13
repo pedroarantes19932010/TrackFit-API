@@ -1,0 +1,28 @@
+"""Gera uma cópia consistente sem parar o SQLite e verifica sua integridade."""
+import argparse
+import os
+import sqlite3
+import tempfile
+from pathlib import Path
+from contextlib import closing
+
+def backup(source, destination):
+    source, destination = Path(source).resolve(), Path(destination).resolve()
+    if destination.exists():
+        raise FileExistsError(destination)
+    # Keep unfinished snapshots out of the path used by restore jobs.
+    with tempfile.TemporaryDirectory(prefix=".trackfit-backup-", dir=destination.parent) as folder:
+        snapshot = Path(folder) / "snapshot.sqlite3"
+        with closing(sqlite3.connect(source.as_uri()+"?mode=ro",uri=True)) as old, closing(sqlite3.connect(snapshot)) as new:
+            old.backup(new)
+            if new.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise ValueError("Cópia inválida.")
+        snapshot.chmod(0o600)
+        os.link(snapshot, destination)  # Atomic, including when another backup finishes first.
+
+if __name__=="__main__":
+    parser=argparse.ArgumentParser()
+    parser.add_argument("source")
+    parser.add_argument("destination")
+    args=parser.parse_args()
+    backup(args.source,args.destination)

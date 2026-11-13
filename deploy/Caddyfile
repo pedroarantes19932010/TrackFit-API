@@ -1,0 +1,6 @@
+{$TRACKFIT_DOMAIN} {
+    request_body {
+        max_size 256KB
+    }
+    reverse_proxy api:8000
+}

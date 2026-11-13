@@ -1,0 +1,20 @@
+plugins { id 'com.android.application' }
+if (file('google-services.json').exists()) { apply plugin: 'com.google.gms.google-services' }
+android {
+    namespace 'br.com.trackfit'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'br.com.trackfit.piloto'
+        minSdk 26
+        targetSdk 35
+        versionCode 11
+        versionName '0.9.0-piloto'
+    }
+    buildFeatures { buildConfig true }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+
+// Firebase only starts when a trainer enables alerts and client settings are present.
+dependencies {
+    implementation 'com.google.mlkit:text-recognition:16.0.1'
+    implementation 'com.google.firebase:firebase-messaging:24.1.2' }

@@ -1,0 +1,76 @@
+[
+  {
+    "profile": {
+      "goal": "condicionamento",
+      "experience": "iniciante",
+      "minutes": 40
+    },
+    "candidates": [
+      {
+        "id": "curta",
+        "data": {
+          "minutes": 20,
+          "days": [
+            {
+              "exercises": [
+                {
+                  "name": "Movimento fictício",
+                  "sets": 1,
+                  "reps": 1,
+                  "rest_seconds": 30
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "longa",
+        "data": {
+          "minutes": 40,
+          "days": [
+            {
+              "exercises": [
+                {
+                  "name": "Movimento fictício",
+                  "sets": 1,
+                  "reps": 1,
+                  "rest_seconds": 30
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "expected": "longa"
+  },
+  {
+    "profile": {
+      "goal": "condicionamento",
+      "experience": "iniciante",
+      "minutes": 20
+    },
+    "candidates": [
+      {
+        "id": "curta",
+        "data": {
+          "minutes": 20,
+          "days": [
+            {
+              "exercises": [
+                {
+                  "name": "Movimento fictício",
+                  "sets": 1,
+                  "reps": 1,
+                  "rest_seconds": 30
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "expected": "curta"
+  }
+]

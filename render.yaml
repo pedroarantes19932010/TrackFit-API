@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: trackfit-piloto
+    runtime: docker
+    plan: starter
+    branch: codex/android-piloto
+    autoDeployTrigger: "off"
+    healthCheckPath: /health
+    disk:
+      name: trackfit-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: TRACKFIT_DB
+        value: /data/trackfit.sqlite3
+      - key: TRACKFIT_PROVIDER
+        value: demo
+      - key: PORT
+        value: "8000"
