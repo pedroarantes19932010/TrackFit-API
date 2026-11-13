@@ -54,9 +54,30 @@ public class MainActivity extends Activity {
     }
     @Override protected void onActivityResult(int code,int result,android.content.Intent data) {
         super.onActivityResult(code,result,data);
-        if(code!=42 || photoRequest==null)return;
+        if((code!=42 && code!=43) || photoRequest==null)return;
         final String request=photoRequest;
         photoRequest=null;
+        if(code==43){
+            android.net.Uri uri=result==RESULT_OK && data!=null?data.getData():null;
+            executor.execute(()->{
+                String encoded="";
+                if(uri!=null)try{
+                    android.graphics.BitmapFactory.Options opt=new android.graphics.BitmapFactory.Options();
+                    opt.inJustDecodeBounds=true;
+                    try(InputStream in=getContentResolver().openInputStream(uri)){android.graphics.BitmapFactory.decodeStream(in,null,opt);}
+                    opt.inJustDecodeBounds=false;opt.inSampleSize=1;
+                    while(Math.max(opt.outWidth,opt.outHeight)/opt.inSampleSize>900)opt.inSampleSize*=2;
+                    android.graphics.Bitmap bmp;
+                    try(InputStream in=getContentResolver().openInputStream(uri)){bmp=android.graphics.BitmapFactory.decodeStream(in,null,opt);}
+                    if(bmp!=null){
+                        ByteArrayOutputStream out=new ByteArrayOutputStream();bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG,65,out);bmp.recycle();
+                        if(out.size()<=165000)encoded=android.util.Base64.encodeToString(out.toByteArray(),android.util.Base64.NO_WRAP);
+                    }
+                }catch(Exception ignored){}
+                String script="window.visualPhotoResult("+JSONObject.quote(request)+","+JSONObject.quote(encoded)+")";
+                runOnUiThread(()->{if(web!=null)web.evaluateJavascript(script,null);});
+            });return;
+        }
         if(result!=RESULT_OK || data==null || data.getData()==null){photoResult(request,"");return;}
         try {
             com.google.mlkit.vision.common.InputImage image=com.google.mlkit.vision.common.InputImage.fromFilePath(this,data.getData());
@@ -67,13 +88,15 @@ public class MainActivity extends Activity {
         } catch(Exception e){photoResult(request,"");}
     }
     private class Bridge {
-        @JavascriptInterface public void selectEquipmentPhoto(String request) {
+        @JavascriptInterface public void selectEquipmentPhoto(String request) { choosePhoto(request,42); }
+        @JavascriptInterface public void selectVisualPhoto(String request) { choosePhoto(request,43); }
+        private void choosePhoto(String request,int code) {
             if(request==null || !request.matches("[a-fA-F0-9-]{36}"))return;
             runOnUiThread(()->{
                 photoRequest=request;
                 android.content.Intent chooser=new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT)
                     .addCategory(android.content.Intent.CATEGORY_OPENABLE).setType("image/*");
-                try {startActivityForResult(chooser,42);}
+                try {startActivityForResult(chooser,code);}
                 catch(android.content.ActivityNotFoundException e){photoRequest=null;photoResult(request,"");}
             });
         }

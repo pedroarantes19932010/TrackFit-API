@@ -41,6 +41,15 @@ class Prescription(Strict):
     name: str = Field(min_length=2, max_length=100)
     sets: int = Field(ge=1, le=6)
     reps: int = Field(ge=1, le=30)
+    reps_max: int | None = Field(default=None,ge=1,le=100)
+    per_side: bool | None = None
+
+    @field_validator("reps_max")
+    @classmethod
+    def valid_range(cls,value,info):
+        if value is not None and value<info.data.get("reps",1): raise ValueError("Faixa invertida.")
+        return value
+
     rest_seconds: int = Field(ge=15, le=300)
     instructions: str = Field(min_length=1, max_length=500)
 
@@ -73,6 +82,7 @@ class Generate(Strict):
     profile: Profile
 
 class Review(Strict):
+    reason: Literal["equipamento","tempo","dificuldade","execucao","preferencia","outro"] | None = None
     expected_version: int = Field(ge=1)
     action: Literal["approve", "edit", "suspend"]
     note: str = Field(min_length=3, max_length=1000)
@@ -90,5 +100,6 @@ class PerformedSet(Strict):
     reps: int = Field(ge=0, le=100)
 
 class Finish(Strict):
+    swaps: dict[str,str] | None = Field(default=None,max_length=12)
     sets: list[PerformedSet] = Field(min_length=1, max_length=72)
     note: str = Field(max_length=1000)

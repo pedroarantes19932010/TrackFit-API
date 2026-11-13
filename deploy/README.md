@@ -16,3 +16,9 @@ O servidor conserva o aviso na caixa do treinador se o envio falhar. A fila usa 
 ## Recuperar o acesso do treinador
 
 Se o código do treinador do piloto vencer ou for perdido, o administrador do servidor pode executar `docker compose exec api python -m server.bootstrap --renew` na pasta deploy. O comando mostra um novo código válido por 30 dias no terminal privado. Entre com ele e reative os avisos em **Avisos**. Os códigos anteriores do treinador perdem a validade. Os alunos mantêm seus códigos, vínculos e treinos. A operação se aplica à instalação com um único treinador do piloto autenticado por código.
+
+## Hospedagem e backup externo
+
+O render.yaml da branch codex/android-piloto prepara uma instância Docker paga com HTTPS e disco persistente. No Render, use New → Blueprint e selecione esta branch. Confira o preço do serviço e do disco antes de criar. Use o Shell privado do serviço para executar `python -m server.bootstrap --name Pedro`. Configure a IA e o Firebase como descrito acima, nas variáveis privadas do serviço. Para visão habilite também TRACKFIT_VISION=openai. A seleção manual e a leitura da placa funcionam sem esse provedor.
+
+Em um host Docker Compose, inicialize um repositório restic em armazenamento externo, mantenha RESTIC_PASSWORD_FILE em local privado e rode diariamente `sh deploy/backup-offsite.sh` no agendador do host com RESTIC_REPOSITORY e as credenciais desse destino. O script interrompe no primeiro erro e verifica o repositório. Para recuperar, extraia trackfit.sqlite3 do snapshot escolhido para outra instância e teste o login antes de trocar o servidor. No Render, configure a exportação externa no ambiente que tem acesso ao disco. O script de Compose precisa do host Docker.

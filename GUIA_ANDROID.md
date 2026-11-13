@@ -70,3 +70,11 @@ Com as credenciais de API configuradas no ambiente, a opção `--provider openai
 Na ficha liberada do aluno, o treinador escolhe **Data do treino** e toca em **Agendar treino**. O mesmo agendamento pode ser retirado na **Agenda semanal**. A agenda usa a semana de segunda a domingo no horário de Brasília (UTC−3). O aluno vê as próprias datas e pode abrir a ficha. O treinador também vê as conversas cuja última mensagem veio do aluno.
 
 O painel conta as sessões concluídas pela data em que foram iniciadas e só recebe o registro depois da sincronização. Assim, um treino que voltar da academia sem sinal pode aparecer mais tarde na semana original. Uma ficha agendada aparece como concluída quando há uma sessão concluída daquela ficha iniciada naquela data.
+
+## Piloto 0.9
+
+O inventário pode ser salvo por nome de academia na avaliação. É guardado criptografado no Android para o aluno e servidor atuais. No treino iniciado, a alternativa aprovada pode ser escolhida antes de preencher a primeira série daquele exercício, inclusive offline. Ao sincronizar, o servidor valida o exercício alternativo contra a cópia da sessão. Um modelo anterior sem alternativa continua utilizável.
+
+Na edição da ficha, use máximo da faixa e por lado para complementar as repetições. Em Revisar evolução, duas sessões concluídas comparáveis geram uma observação para o treinador. Cada revisão permite classificar o motivo. No experimento local, rode `python -m server.synthetic_decisions`. As probabilidades dos cenários e os rótulos são hipotéticos, o teste é separado por combinação de atributos e o resultado não é usado para prescrever a alunos.
+
+Para configurar os avisos, adicione FIREBASE_ANDROID_CLIENT_JSON aos secrets do GitHub ou compile com google-services.json no Android Studio. O workflow manual gera o APK com a configuração cliente; o envio pelo servidor precisa das credenciais privadas descritas em deploy/README.md. A foto de aparência é opcional e enviada à API apenas ao selecionar a opção de envio. Sem configuração, use a placa ou a lista manual.

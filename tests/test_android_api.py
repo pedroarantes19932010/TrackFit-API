@@ -109,6 +109,26 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.generate(inventory=['Leg press 45°'],needs_review=True).json()['days'],[])
         self.assertEqual(self.generate(inventory=['aparelho desconhecido']).status_code,422)
 
+    def test_swap_finish_and_insights(self):
+        e=DAY['exercises'][0]|{'exercise_id':'hack_squat','reps_max':12,'per_side':True}
+        alt=e|{'exercise_id':'leg_press_45','name':'Leg press'}
+        r=self.client.post('/templates',headers=self.t,json=TEMPLATE|{'days':[DAY|{'exercises':[e|{'alternative':alt}]}]})
+        self.client.post('/templates/'+r.json()['id']+'/approval',headers=self.t,json={'approved':True}).raise_for_status()
+        plan=self.generate(inventory=['Hack machine']).json()
+        session=self.start(plan)
+        self.assertEqual(session['snapshot']['swap_options']['0']['exercise_id'],'leg_press_45')
+        body={'sets':[{'exercise_index':0,'set_index':0,'weight_kg':10,'reps':12}],'note':''}
+        path='/sessions/'+session['id']+'/finish'
+        self.assertEqual(self.client.post(path,headers=self.s,json=body|{'swaps':{'0':'other'}}).status_code,422)
+        self.client.post(path,headers=self.s,json=body|{'swaps':{'0':'leg_press_45'}}).raise_for_status()
+        for _ in range(2):
+            session=self.start(plan)
+            self.client.post('/sessions/'+session['id']+'/finish',headers=self.s,json=body).raise_for_status()
+        self.assertEqual(len(self.client.get('/plans/'+plan['id']+'/insights',headers=self.t).json()),1)
+        response=self.client.post('/plans/'+plan['id']+'/review',headers=self.t,json={'action':'approve','reason':'tempo','note':'Teste','expected_version':1})
+        self.assertEqual(response.json()['review_reason'],'tempo')
+        self.assertEqual(self.client.post('/equipment/identify',headers=self.s,json={'jpeg':'A'*32}).status_code,503)
+
     def test_idempotent_plan_and_notification(self):
         self.template(); body={'request_id':str(uuid4()),'profile':PROFILE}
         a=self.client.post('/plans',headers=self.s,json=body)

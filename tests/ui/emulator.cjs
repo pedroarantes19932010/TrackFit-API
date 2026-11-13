@@ -93,6 +93,12 @@ async function connected(page) {
   assert.equal(await rowEquipment.isChecked(),false);
   await page.getByRole('button',{name:'Confirmar Remada sentada (máquina)'}).click();
   assert.equal(await rowEquipment.isChecked(),true);
+  await page.locator('#gymName').fill('Academia de teste');
+  await page.locator('#gymSave').click();
+  await rowEquipment.uncheck();
+  await page.locator('#gymSelect').selectOption('');
+  await page.locator('#gymSelect').selectOption('Academia de teste');
+  assert.equal(await rowEquipment.isChecked(),true);
   await page.locator('#generate').click();
   await page.getByText('Consultar catálogo',{exact:true}).click();
   await page.getByRole('button',{name:/Canal fictício/}).click();

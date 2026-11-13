@@ -131,6 +131,20 @@ function assessment(){
  if(!demo){
    const items=[...new Set(catalog.map(e=>e.equipment))].filter(e=>e!=='peso corporal');
    $('#generate').insertAdjacentHTML('beforebegin','<fieldset id="inventory"><legend>Quais equipamentos estão disponíveis?</legend><p>Marque apenas os que você confirma. Sem aparelhos marcados, a seleção considera apenas peso corporal.</p>'+items.map(name=>'<label><input type="checkbox" class="equipment-item" value="'+esc(name)+'">'+esc(name)+'</label>').join('')+'<button id="photo" type="button" class="secondary">Ler foto da placa do aparelho</button><p id="photoResult" role="status"></p></fieldset>');
+   const field=$('#inventory'),key=JSON.stringify(['academias',origin,me.id]);
+   const gyms=new Map(JSON.parse(TrackFitNative.loadFinish(key)||'[]'));
+   field.insertAdjacentHTML('beforeend',input('gymName','Nome da academia')+'<select id="gymSelect" aria-label="Academias salvas"></select><button id="gymSave">Salvar inventário neste aparelho</button><button id="vision">Enviar foto do aparelho para identificação por IA</button>');
+   function gymChoices(){const picker=$('#gymSelect');picker.replaceChildren(new Option('Carregar academia salva',''));for(const name of gyms.keys())picker.add(new Option(name,name));}
+   gymChoices();
+   $('#gymSelect').onchange=()=>{const name=$('#gymSelect').value;if(!gyms.has(name))return;$('#gymName').value=name;for(const el of field.querySelectorAll('.equipment-item'))el.checked=gyms.get(name).includes(el.value);};
+   button('gymSave',()=>{
+     const name=$('#gymName').value.trim();
+     if(!name||name.length>80)throw Error('Informe um nome de até 80 caracteres.');
+     gyms.set(name,[...field.querySelectorAll('.equipment-item:checked')].map(e=>e.value));
+     if(!TrackFitNative.storeFinish(key,JSON.stringify([...gyms])))throw Error('Não foi possível salvar.');
+     gymChoices();$('#gymSelect').value=name;toast('Inventário salvo.');
+   });
+   button('vision',()=>{field.dataset.request=uuid();TrackFitNative.selectVisualPhoto(field.dataset.request);});
    button('photo',()=>{
      const field=$('#inventory');field.dataset.request=uuid();
      if(!window.TrackFitNative?.selectEquipmentPhoto)throw Error('Selecione os aparelhos manualmente neste dispositivo.');
@@ -139,6 +153,19 @@ function assessment(){
  }
  button('generate',async()=>{if(!$('#review').value||!$('#consent').checked)throw Error('Responda à pergunta de saúde e marque a autorização.');const profile={age:Number($('#age').value),goal:$('#goal').value,experience:$('#experience').value,equipment:$('#equipment').value,days:Number($('#days').value),minutes:Number($('#minutes').value),needs_review:$('#review').value==='yes',limitations:$('#limits').value.trim(),consent:true};if(!demo)profile.inventory=[...document.querySelectorAll('.equipment-item:checked')].map(el=>el.value);const serialized=JSON.stringify(profile);if(!generation||generation.serialized!==serialized)generation={serialized,id:uuid()};const p=await api('POST','/plans',{request_id:generation.id,profile});generation=null;await detail(p.id);});
 }
+window.visualPhotoResult=async(request,jpeg)=>{
+ const field=$('#inventory');if(!field||field.dataset.request!==request)return;
+ try{
+   if(!jpeg)throw Error('Foto indisponível. Marque o equipamento manualmente.');
+   const result=await api('POST','/equipment/identify',{jpeg});
+   if(!field.isConnected||field.dataset.request!==request)return;
+   const item=[...field.querySelectorAll('.equipment-item')].find(e=>e.value===result.item);
+   const target=$('#photoResult');target.replaceChildren();
+   if(!item){target.textContent='Aparência inconclusiva. Confira a placa.';return;}
+   const confirm=document.createElement('button');confirm.textContent='Confirmar '+item.value;
+   confirm.onclick=()=>{item.checked=true;confirm.remove();};target.append(confirm);
+ }catch(e){if(field.isConnected)toast(e.message);}
+};
 window.equipmentPhotoResult=(request,text)=>{
  const field=$('#inventory');
  if(!field||field.dataset.request!==request)return;
@@ -206,7 +233,9 @@ async function videoEditor(selected){
    await videoEditor(id);
  });
 }
-function daysHtml(days){return days.map(d=>`<div class="card"><h2>${esc(d.title)}</h2>${d.exercises.map(e=>`<div class="exercise"><strong>${esc(e.name)}</strong><span>${e.sets} séries × ${e.reps} repetições • ${e.rest_seconds}s descanso</span><small>${esc(e.instructions)}</small>${catalogHelp(e.exercise_id)}${e.alternative?'<p>Alternativa aprovada no modelo: '+esc(e.alternative.name)+' • '+e.alternative.sets+' × '+e.alternative.reps+' • '+e.alternative.rest_seconds+' s</p><small>'+esc(e.alternative.instructions)+'</small>':''}</div>`).join('')}</div>`).join('');}
+function repetitions(e){return String(e.reps)+(e.reps_max?'–'+e.reps_max:'')+(e.per_side?' por lado':'');}
+const reasonOptions=[['outro','Outro'],['equipamento','Equipamento'],['tempo','Tempo'],['dificuldade','Dificuldade'],['execucao','Execução'],['preferencia','Preferência']];
+function daysHtml(days){return days.map(d=>`<div class="card"><h2>${esc(d.title)}</h2>${d.exercises.map(e=>`<div class="exercise"><strong>${esc(e.name)}</strong><span>${e.sets} séries × ${repetitions(e)} repetições • ${e.rest_seconds}s descanso</span><small>${esc(e.instructions)}</small>${catalogHelp(e.exercise_id)}${e.alternative?'<p>Alternativa aprovada no modelo: '+esc(e.alternative.name)+' • '+e.alternative.sets+' × '+e.alternative.reps+' • '+e.alternative.rest_seconds+' s</p><small>'+esc(e.alternative.instructions)+'</small>':''}</div>`).join('')}</div>`).join('');}
 async function detail(id){
  const account=me;
  const [p, currentCatalog]=await Promise.all([api('GET','/plans/'+id),demo?catalog:api('GET','/catalog')]);
@@ -218,6 +247,7 @@ async function detail(id){
  if(trainer){$('#actions').innerHTML='<button id="approve">Marcar como revisada</button><button id="edit" class="secondary">Editar ficha completa</button><button id="suspend" class="danger">Suspender ficha</button>';button('approve',()=>reviewNote(p,'approve'));button('edit',()=>editPlan(p));button('suspend',()=>reviewNote(p,'suspend'));}
  else if(['released','reviewed'].includes(p.state)){
  $('#actions').innerHTML=select('day','Qual treino fará agora?',p.days.map((d,i)=>[i,esc(d.title)]))+'<button id="start">Iniciar treino</button>';const requestId=uuid();button('start',async()=>{const s=await api('POST',`/plans/${id}/sessions`,{request_id:requestId,expected_version:p.version,day:Number($('#day').value)});sessionView(s,p.days);});}
+ if(trainer&&!demo){$('#actions').insertAdjacentHTML('beforeend','<button id="insights">Revisar evolução</button>');button('insights',()=>insights(id));}
  if(trainer&&!demo&&['released','reviewed'].includes(p.state)){
    $('#actions').insertAdjacentHTML('beforeend',input('scheduledDate','Data do treino','','date')+'<button id="schedule">Agendar treino</button>');
    button('schedule',async()=>{
@@ -257,7 +287,13 @@ async function conversation(id){
    await conversation(id);
  });
 }
-function reviewNote(p,action){page('<h1>'+ (action==='approve'?'Concluir revisão':'Suspender ficha')+'</h1><p>'+ (action==='approve'?'Confirme após avaliar a ficha e as informações do aluno.':'A suspensão impede novos treinos e interrompe sessões ativas.')+'</p><label for="note">Motivo / orientação</label><textarea id="note"></textarea><button id="save">Confirmar</button>');button('save',async()=>{await api('POST',`/plans/${p.id}/review`,{action,expected_version:p.version,note:$('#note').value});await detail(p.id);});}
+async function insights(id){
+ const account=me,rows=await api('GET','/plans/'+id+'/insights');
+ if(me!==account)return;
+ page('<h1>Revisar evolução</h1>'+(!rows.length?'<p>São necessárias duas sessões comparáveis na mesma versão.</p>':rows.map(r=>'<div class="card"><h2>'+esc(r.exercise)+'</h2><p>Repetições anteriores: '+esc(r.previous.join(', '))+'<br>Mais recentes: '+esc(r.latest.join(', '))+'</p><p>'+esc(r.suggestion)+'</p></div>').join(''))+'<button id="backInsights">Voltar à ficha</button>');
+ button('backInsights',()=>detail(id));
+}
+function reviewNote(p,action){page('<h1>'+ (action==='approve'?'Concluir revisão':'Suspender ficha')+'</h1><p>'+ (action==='approve'?'Confirme após avaliar a ficha e as informações do aluno.':'A suspensão impede novos treinos e interrompe sessões ativas.')+'</p>'+select('reason','Categoria da revisão',reasonOptions)+'<label for="note">Motivo / orientação</label><textarea id="note"></textarea><button id="save">Confirmar</button>');button('save',async()=>{await api('POST',`/plans/${p.id}/review`,{action,expected_version:p.version,reason:$('#reason').value,note:$('#note').value});await detail(p.id);});}
 function dayEditor(days){
  $('#editor').innerHTML='';days.forEach((d,i)=>{const box=document.createElement('section');box.className='card day-edit';box.innerHTML=input('title'+i,'Nome do treino',d.title)+'<div class="exercise-fields"></div><button class="secondary add-exercise">Adicionar exercício</button>';
  const list=box.querySelector('.exercise-fields');for(const ex of d.exercises)addExercise(list,ex);
@@ -265,6 +301,7 @@ function dayEditor(days){
 }
 function addExercise(parent,e={name:'',sets:2,reps:10,rest_seconds:60,instructions:''},allowAlternative=true){
  const row=document.createElement('div');row.className='exercise editor-row';row.innerHTML='<label>Nome do exercício</label><input class="ex-name" value="'+esc(e.name)+'"><div class="row"><div><label>Séries</label><input class="ex-sets" type="number" value="'+e.sets+'"></div><div><label>Repetições</label><input class="ex-reps" type="number" value="'+e.reps+'"></div><div><label>Descanso (s)</label><input class="ex-rest" type="number" value="'+e.rest_seconds+'"></div></div><label>Orientações de execução e carga</label><textarea class="ex-instructions">'+esc(e.instructions)+'</textarea><button class="ghost remove">Remover</button>';row.dataset.catalogId=e.exercise_id||'';
+ row.querySelector('.ex-reps').parentElement.insertAdjacentHTML('beforeend','<label>Máximo da faixa (opcional)</label><input class="ex-max" type="number" value="'+esc(e.reps_max||'')+'"><label><input class="ex-side" type="checkbox" '+(e.per_side?'checked':'')+'>Por lado</label>');
  if(catalog.length){
    const label=document.createElement('label');label.textContent='Referência do catálogo';
    const picker=document.createElement('select');picker.add(new Option('Exercício personalizado',''));
@@ -290,6 +327,8 @@ function addExercise(parent,e={name:'',sets:2,reps:10,rest_seconds:60,instructio
 function readExercise(row){
  const value=selector=>row.querySelector(selector).value;
  const exercise={name:value('.ex-name'),sets:Number(value('.ex-sets')),reps:Number(value('.ex-reps')),rest_seconds:Number(value('.ex-rest')),instructions:value('.ex-instructions')};
+ if(value('.ex-max'))exercise.reps_max=Number(value('.ex-max'));
+ if(row.querySelector('.ex-side').checked)exercise.per_side=true;
  if(row.dataset.catalogId)exercise.exercise_id=row.dataset.catalogId;
  const alt=row.querySelector('.alt-fields > .editor-row');
  if(alt){
@@ -299,7 +338,7 @@ function readExercise(row){
  return exercise;
 }
 function readDays(){return [...document.querySelectorAll('.day-edit')].map((day,i)=>({title:$('#title'+i).value,exercises:[...day.querySelectorAll('.exercise-fields > .editor-row')].map(readExercise)}));}
-function editPlan(p){page('<span class="eyebrow">REVISÃO PROFISSIONAL</span><h1>Ajustar ficha.</h1><p>A nova versão será usada nos próximos treinos. A sessão em andamento mantém sua ficha original.</p><div id="editor"></div><label for="note">O que você avaliou e alterou?</label><textarea id="note"></textarea><button id="save">Salvar e liberar versão revisada</button>');dayEditor(p.days.length?p.days:Array.from({length:p.profile.days},(_,i)=>({title:'Treino '+(i+1),exercises:[]})));button('save',async()=>{await api('POST',`/plans/${p.id}/review`,{action:'edit',expected_version:p.version,note:$('#note').value,days:readDays()});await detail(p.id);});}
+function editPlan(p){page('<span class="eyebrow">REVISÃO PROFISSIONAL</span><h1>Ajustar ficha.</h1><p>A nova versão será usada nos próximos treinos. A sessão em andamento mantém sua ficha original.</p><div id="editor"></div>'+select('reason','Categoria da revisão',reasonOptions)+'<label for="note">O que você avaliou e alterou?</label><textarea id="note"></textarea><button id="save">Salvar e liberar versão revisada</button>');dayEditor(p.days.length?p.days:Array.from({length:p.profile.days},(_,i)=>({title:'Treino '+(i+1),exercises:[]})));button('save',async()=>{await api('POST',`/plans/${p.id}/review`,{action:'edit',expected_version:p.version,reason:$('#reason').value,note:$('#note').value,days:readDays()});await detail(p.id);});}
 async function templates(){const rows=await api('GET','/templates');page('<span class="eyebrow">SUA BASE PROFISSIONAL</span><h1>Modelos de treino.</h1><p>Somente modelos aprovados podem ser selecionados automaticamente. Aprovar um modelo não aprova todas as fichas já geradas.</p><button id="newTemplate">Criar modelo</button><div id="templates"></div>');button('newTemplate',newTemplate);for(const t of rows){const el=document.createElement('div');el.className='card';el.innerHTML=`<span class="badge">${t.approved?'Aprovado para seleção':'Rascunho'}</span><h2>${esc(t.data.name)}</h2><p>${esc(t.data.goal)} • ${t.data.days.length} dias • ${t.data.minutes} min<br>${esc(t.data.experience)} • ${esc(t.data.equipment)} • ${t.data.min_age}–${t.data.max_age} anos</p><details><summary>Ver ficha completa</summary>${daysHtml(t.data.days)}</details><button>${t.approved?'Retirar da seleção automática':'Aprovar este modelo'}</button>`;el.lastElementChild.onclick=async()=>{try{await api('POST',`/templates/${t.id}/approval`,{approved:!t.approved});await templates();}catch(e){toast(e.message);}};$('#templates').append(el);}if(!rows.length)$('#templates').innerHTML='<p class="empty">Nenhum modelo. A liberação automática está desativada até você criar e aprovar um.</p>';}
 function newTemplate(){page('<span class="eyebrow">NOVO MODELO</span><h1>Sua ficha de referência.</h1>'+input('modelName','Nome do modelo')+select('goal','Objetivo',goals)+select('experience','Experiência',levels)+select('equipment','Equipamentos',equipment)+input('minutes','Duração estimada por treino (minutos)',40,'number')+'<div class="row"><div>'+input('minAge','Idade mínima',18,'number')+'</div><div>'+input('maxAge','Idade máxima',60,'number')+'</div></div>'+input('dayCount','Dias por semana',1,'number')+'<button id="makeDays" class="secondary">Preparar os dias</button><div id="editor"></div><button id="save">Salvar como rascunho</button>');dayEditor([{title:'Treino 1',exercises:[]}]);button('makeDays',()=>{const count=Number($('#dayCount').value);if(count<1||count>6||!Number.isInteger(count))throw Error('Escolha de 1 a 6 dias.');const current=readDays();if(count<current.length)throw Error('Para reduzir dias, abra um novo modelo. Isso evita apagar seu trabalho.');dayEditor(Array.from({length:count},(_,i)=>current[i]||{title:'Treino '+(i+1),exercises:[]}));});button('save',async()=>{await api('POST','/templates',{name:$('#modelName').value,goal:$('#goal').value,experience:$('#experience').value,equipment:$('#equipment').value,minutes:Number($('#minutes').value),min_age:Number($('#minAge').value),max_age:Number($('#maxAge').value),days:readDays()});await templates();});}
 async function timeline(pageNumber) {
@@ -318,7 +357,8 @@ async function timeline(pageNumber) {
      const actual=document.createElement('div');
      for(const set of row.payload.actual.sets){
        const line=document.createElement('p');
-       line.textContent=row.payload.day.exercises[set.exercise_index].name+' • série '+(set.set_index+1)+': '+set.weight_kg+' kg × '+set.reps;
+       const day=row.payload.day;const performed=row.payload.actual.swaps?.[set.exercise_index]?day.swap_options[set.exercise_index]:day.exercises[set.exercise_index];
+       line.textContent=performed.name+' • série '+(set.set_index+1)+': '+set.weight_kg+' kg × '+set.reps;
        actual.append(line);
      }
      card.append(actual);
@@ -408,9 +448,19 @@ function sessionView(s,planDays){
  }else{native?.storeFinish?.(scope,'');}
 
  page('<span class="eyebrow">TREINO • VERSÃO '+s.version+'</span><h1>'+esc(s.snapshot.title)+'</h1><div class="notice">Registre somente o que realizou. A carga não é sugerida automaticamente. Zero significa ausência de carga externa. Campos vazios não são registrados.</div><div id="sets"></div>'+ (s.state==='active'?'<label for="note">Observações</label><textarea id="note" maxlength="1000"></textarea><p id="saveState" role="status"></p><button id="finish">Salvar treino realizado</button>':'<p>Este registro está '+esc(s.state==='finished'?'concluído':'suspenso')+'.</p>'));
- for(let i=0;i<s.snapshot.exercises.length;i++){const e=s.snapshot.exercises[i];const box=document.createElement('div');box.className='card';box.innerHTML='<h2>'+esc(e.name)+'</h2><p>'+esc(e.instructions)+'</p><small>Referência: '+e.sets+' × '+e.reps+' • '+e.rest_seconds+'s de descanso</small>'+catalogHelp(e.exercise_id);for(let j=0;j<e.sets;j++){const actual=(s.actual||pending||editing)?.sets.find(x=>x.exercise_index===i&&x.set_index===j);const row=document.createElement('div');row.className='row set-row';row.dataset.exercise=i;row.dataset.set=j;row.innerHTML='<div><label>Série '+(j+1)+' • kg</label><input class="weight" maxlength="16" inputmode="decimal" value="'+esc(actual?.weight_kg??'')+'" '+(s.state!=='active'?'disabled':'')+'></div><div><label>Repetições realizadas</label><input class="reps" type="number" value="'+esc(actual?.reps??'')+'" '+(s.state!=='active'?'disabled':'')+'></div>';const previous=s.snapshot.previous_sets?.find(v=>v.exercise_index===i&&v.set_index===j);
+ const swaps={...((pending||editing||s.actual)?.swaps||{})};
+ for(let i=0;i<s.snapshot.exercises.length;i++){const alt=s.snapshot.swap_options?.[i];const e=swaps[i]&&alt?alt:s.snapshot.exercises[i];const box=document.createElement('div');box.className='card';box.innerHTML='<h2>'+esc(e.name)+'</h2><p>'+esc(e.instructions)+'</p><small>Referência: '+e.sets+' × '+repetitions(e)+' • '+e.rest_seconds+'s de descanso</small>'+catalogHelp(e.exercise_id);for(let j=0;j<e.sets;j++){const actual=(s.actual||pending||editing)?.sets.find(x=>x.exercise_index===i&&x.set_index===j);const row=document.createElement('div');row.className='row set-row';row.dataset.exercise=i;row.dataset.set=j;row.innerHTML='<div><label>Série '+(j+1)+' • kg</label><input class="weight" maxlength="16" inputmode="decimal" value="'+esc(actual?.weight_kg??'')+'" '+(s.state!=='active'?'disabled':'')+'></div><div><label>Repetições realizadas</label><input class="reps" type="number" value="'+esc(actual?.reps??'')+'" '+(s.state!=='active'?'disabled':'')+'></div>';const previous=!swaps[i]&&s.snapshot.previous_sets?.find(v=>v.exercise_index===i&&v.set_index===j);
  if(previous){const hint=document.createElement('small');hint.className='previous-set';hint.textContent='Último treino: '+previous.weight_kg.toLocaleString('pt-BR')+' kg × '+previous.reps+' rep.';row.firstElementChild.append(hint);}
  box.append(row);}
+ if(s.state==='active'&&alt&&!swaps[i]&&!pending){
+   const swap=document.createElement('button');swap.className='secondary';swap.textContent='Tenho '+alt.name+' disponível • trocar exercício';
+   swap.onclick=()=>{
+     if([...box.querySelectorAll('input')].some(el=>el.value))return toast('Troque antes de registrar a primeira série deste exercício.');
+     if(Object.values(swaps).includes(alt.exercise_id))return toast('Alternativa já utilizada.');
+     swaps[i]=alt.exercise_id;
+     if(saveEditing())sessionView(s,planDays);else delete swaps[i];
+   };box.append(swap);
+ }
  if(s.state==='active')restTimer(box,e);
  $('#sets').append(box);}
  if(downloadMessage||offline){
@@ -444,8 +494,9 @@ function sessionView(s,planDays){
      if(weight||reps)sets.push({exercise_index:Number(row.dataset.exercise),set_index:Number(row.dataset.set),weight_kg:weight,reps});
    }
    const note=$('#note').value;
-   const saved=native.storeFinish(scope,sets.length||note?JSON.stringify({mode:'editing',sets,note}):'');
+   const saved=native.storeFinish(scope,sets.length||note||Object.keys(swaps).length?JSON.stringify({mode:'editing',sets,note,swaps}):'');
    status.textContent=saved?'Rascunho salvo neste aparelho.':'Não foi possível guardar o rascunho neste aparelho.';
+   return saved;
  }
  $('#sets').addEventListener('input',saveEditing);
  $('#note').addEventListener('input',saveEditing);
@@ -453,6 +504,7 @@ function sessionView(s,planDays){
  button('finish',async()=>{
    if(!pending){
      const body=finishPayload();
+     if(Object.keys(swaps).length)body.swaps=swaps;
      if(native?.storeFinish&&!native.storeFinish(scope,JSON.stringify(body)))throw Error('Não foi possível guardar a tentativa neste aparelho. Os campos continuam disponíveis.');
      pending=body;
    }

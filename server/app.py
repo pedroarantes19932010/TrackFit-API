@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from trackfit_api.identity import current_user, request_database
 from trackfit_api.auth_routes import router as auth_router
 from trackfit_api.workout_routes import router as workout_router
-from server import push, timeline, support, videos, weekly
+from server import push, timeline, support, videos, weekly, coaching
 from trackfit_api.catalog_routes import router as catalog_router
 from datetime import datetime
 from server.accounts import add_code_account, prepare_accounts
@@ -71,11 +71,11 @@ def create_app(db_path=None, mode=None, chooser=None):
 
     with db(True) as conn:
         prepare_accounts(conn)
-        for statement in (SCHEMA + push.SCHEMA + support.SCHEMA + videos.SCHEMA + weekly.SCHEMA).split(";"):
+        for statement in (SCHEMA + push.SCHEMA + support.SCHEMA + videos.SCHEMA + weekly.SCHEMA + coaching.SCHEMA).split(";"):
             if statement.strip():
                 conn.execute(statement)
     push_enabled = os.getenv("TRACKFIT_PUSH") == "fcm"
-    app = FastAPI(title="TrackFit — piloto", version="0.4.0", lifespan=push.worker_lifespan(db,push_enabled))
+    app = FastAPI(title="TrackFit — piloto", version="0.9.0", lifespan=push.worker_lifespan(db,push_enabled))
     app.state.db = db
 
     app.include_router(catalog_router)
@@ -128,6 +128,9 @@ def create_app(db_path=None, mode=None, chooser=None):
         out["days"] = data if user["role"] == "trainer" or plan["state"] in ("released", "reviewed") else []
         out["profile"] = json.loads(plan["profile"])
         out["note"] = version["note"]
+        if user["role"]=="trainer":
+            reason=conn.execute("SELECT reason FROM review_reasons WHERE plan=? AND version=?",(plan["id"],plan["version"])).fetchone()
+            out["review_reason"]=reason[0] if reason else None
         out["student_name"] = conn.execute("SELECT COALESCE(n.name,u.username) FROM users u LEFT JOIN mobile_names n USING(user_id) WHERE u.user_id=?", (plan["student"],)).fetchone()[0]
         out.pop("request_hash", None)
         return out
@@ -255,6 +258,8 @@ def create_app(db_path=None, mode=None, chooser=None):
             if body.action != "suspend" and not days:
                 raise HTTPException(422, "Adicione exercícios antes de aprovar.")
             version = plan["version"]+1
+            if body.reason:
+                conn.execute("INSERT INTO review_reasons VALUES(?,?,?)",(plan_id,version,body.reason))
             state = "suspended" if body.action == "suspend" else "reviewed"
             conn.execute("INSERT INTO versions VALUES(?,?,?,?,?)", (plan_id,version,packed(days),body.note,time.time()))
             conn.execute("UPDATE plans SET version=?,state=? WHERE id=?", (version,state,plan_id))
@@ -329,12 +334,38 @@ def create_app(db_path=None, mode=None, chooser=None):
             if body.day >= len(days):
                 raise HTTPException(422, "Dia inválido.")
             day = days[body.day]
+            if plan["version"]==1 and plan["template_id"]:
+                model=conn.execute("SELECT data FROM templates WHERE id=? AND approved=1",(plan["template_id"],)).fetchone()
+                if model:
+                    original=json.loads(model[0])["days"][body.day]["exercises"]
+                    options={str(i):e["alternative"] for i,e in enumerate(original) if e.get("alternative")
+                        and e.get("exercise_id")==day["exercises"][i].get("exercise_id")
+                        and e["alternative"].get("exercise_id")
+                        and e["alternative"]["exercise_id"] not in {ex.get("exercise_id") for ex in day["exercises"]}}
+                    if options: day["swap_options"]=options
+            for i,e in enumerate(day["exercises"]):
+                if e.get("alternative"):
+                    alt=e.pop("alternative")
+                    if alt.get("exercise_id") and not any(x.get("exercise_id")==alt["exercise_id"] for x in day["exercises"]):
+                        day.setdefault("swap_options",{})[str(i)]=alt
+            if not day.get("swap_options"):
+                prior_version=conn.execute("SELECT data FROM versions WHERE plan=? AND version=1",(plan_id,)).fetchone()
+                if prior_version and plan["template_id"] and plan["version"]>1:
+                    first=json.loads(prior_version["data"])
+                    approved=conn.execute("SELECT data FROM templates WHERE id=? AND approved=1",(plan["template_id"],)).fetchone()
+                    if approved and body.day<len(first) and first[body.day]==day:
+                        originals=json.loads(approved[0])["days"][body.day]["exercises"]
+                        options={str(i):item["alternative"] for i,item in enumerate(originals) if item.get("alternative")
+                                 and item.get("exercise_id")==day["exercises"][i].get("exercise_id") and item["alternative"].get("exercise_id")
+                                 and all(x.get("exercise_id")!=item["alternative"]["exercise_id"] for x in day["exercises"])}
+                        if options: day["swap_options"]=options
             previous = conn.execute("""SELECT actual FROM training_sessions
                 WHERE student=? AND plan=? AND version=? AND day=? AND state='finished'
                 ORDER BY created DESC, rowid DESC LIMIT 1""",
                 (user["id"], plan_id, plan["version"], body.day)).fetchone()
             if previous:
-                day["previous_sets"] = json.loads(previous["actual"])["sets"]
+                old_actual=json.loads(previous["actual"])
+                day["previous_sets"] = [x for x in old_actual["sets"] if str(x["exercise_index"]) not in (old_actual.get("swaps") or {})]
             session_id = uid()
             conn.execute("INSERT INTO training_sessions VALUES(?,?,?,?,?,?,?,?,?,?)", (session_id,user["id"],plan_id,plan["version"],body.day,packed(day),"active",None,body.request_id,time.time()))
             return show_session(conn.execute("SELECT * FROM training_sessions WHERE id=?", (session_id,)).fetchone())
@@ -350,7 +381,15 @@ def create_app(db_path=None, mode=None, chooser=None):
                 return show_session(row)
             if row["state"] != "active":
                 raise HTTPException(409, "Treino encerrado ou suspenso. Os dados anteriores foram preservados.")
-            exercises = json.loads(row["snapshot"])["exercises"]
+            snapshot=json.loads(row["snapshot"])
+            exercises=snapshot["exercises"]
+            used=set()
+            for index,exid in (body.swaps or {}).items():
+                alt=snapshot.get("swap_options",{}).get(index)
+                if not alt or alt.get("exercise_id")!=exid or exid in used:
+                    raise HTTPException(422,"Troca indisponível para este treino.")
+                used.add(exid)
+                exercises[int(index)]=alt
             seen = set()
             for s in body.sets:
                 pair = (s.exercise_index,s.set_index)
@@ -360,6 +399,7 @@ def create_app(db_path=None, mode=None, chooser=None):
             conn.execute("UPDATE training_sessions SET state='finished',actual=? WHERE id=?", (actual,session_id))
             return show_session(conn.execute("SELECT * FROM training_sessions WHERE id=?", (session_id,)).fetchone())
 
+    coaching.install(app,db,trainer,student,get_plan)
     weekly.install(app, db, auth, trainer, get_plan)
     videos.install(app, db, auth, trainer)
     support.install(app, db, auth, get_plan)
